@@ -1,0 +1,21 @@
+body { font-family: system-ui, sans-serif; margin: 0; background: #1c1c1e; color: #eee; }
+header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: #2a2a2d; position: sticky; top: 0; }
+header h1 { font-size: 16px; margin: 0; flex-shrink: 0; }
+#compose { display: flex; flex: 1; gap: 8px; }
+#composeText { flex: 1; padding: 6px 10px; border-radius: 6px; border: 1px solid #444; background: #111; color: #eee; }
+button { cursor: pointer; border: 1px solid #555; background: #333; color: #eee; border-radius: 6px; padding: 6px 10px; }
+button:hover { background: #444; }
+main { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.card { background: #2a2a2d; border-radius: 10px; padding: 14px 16px; border-left: 4px solid #666; }
+.card.question { border-left-color: #e0b23c; }
+.card.note { border-left-color: #4a90d9; }
+.card.answered { opacity: 0.55; }
+.card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.kind-badge { font-size: 10px; text-transform: uppercase; background: #444; padding: 2px 6px; border-radius: 4px; }
+.project { margin-left: auto; font-size: 12px; color: #999; }
+.context { color: #bbb; margin: 4px 0; }
+.images { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+.images img { max-width: 320px; max-height: 240px; border-radius: 6px; border: 1px solid #444; }
+.reply-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.reply-text { flex: 1; min-width: 160px; padding: 6px 10px; border-radius: 6px; border: 1px solid #444; background: #111; color: #eee; }
+.answered { font-style: italic; color: #8f8; margin-top: 8px; }
