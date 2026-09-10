@@ -2,18 +2,54 @@
 <html>
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Review Board</title>
     <link rel="stylesheet" href="style.css" />
+    <link rel="icon" href="icon.png" />
+    <link rel="apple-touch-icon" href="icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Review Board" />
+    <meta name="theme-color" content="#1c1c1e" />
   </head>
   <body>
     <header>
       <h1>Review Board</h1>
       <form id="compose">
-        <input id="composeText" placeholder="Send a message to the AI session…" autocomplete="off" />
+        <textarea id="composeText" rows="1" placeholder="Send a message to the AI session… (Shift+Enter for a new line, paste an image to attach)"></textarea>
         <button type="submit">Send</button>
       </form>
+      <button id="notifyToggle">🔔 <span class="btn-label">Notifications</span></button>
+      <button id="historyToggle">🕘 <span class="btn-label">History</span></button>
     </header>
-    <main id="cards"></main>
+    <div id="composeChips"></div>
+    <div id="notifyStatus" hidden></div>
+    <main>
+      <section class="section-block" id="blockOpen">
+        <div class="section-header" style="--accent:#d9a441">
+          <span class="section-title">À toi de répondre</span>
+          <span class="section-count" id="countOpen"></span>
+          <span class="section-rule"></span>
+        </div>
+        <div class="section-cards" id="cardsOpen"></div>
+      </section>
+      <section class="section-block" id="blockIssues">
+        <div class="section-header issue" style="--accent:#6cbf6c">
+          <span class="section-title">Tes issues — l'IA travaille dessus</span>
+          <span class="section-count issue-count" id="countIssues"></span>
+          <span class="section-rule"></span>
+        </div>
+        <div class="section-cards" id="cardsIssues"></div>
+      </section>
+      <section class="section-block" id="blockHistory">
+        <div class="section-header muted">
+          <span class="section-title">Réglé récemment</span>
+          <span class="section-rule"></span>
+          <span class="history-hint" id="historyHint">Voir l'historique →</span>
+        </div>
+        <div class="section-cards" id="cardsHistory"></div>
+      </section>
+    </main>
+    <script src="marked.min.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

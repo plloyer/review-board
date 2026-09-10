@@ -44,7 +44,8 @@ Add to that project's `.mcp.json`:
 
 A message: `title` (required), `kind` (`review` default / `question` / `note`),
 `options` (one-click answers, max 8), `context`, `details` (bullets), `images`
-(absolute local file paths — the board reads them directly, no upload), `project`.
+and `videos` (absolute local file paths — the board reads them directly, no
+upload; videos render as `<video controls>`), `project`.
 
 You can also type into the board's own compose box; that lands as a message
 *from you* and is delivered on the AI's next `await_replies` call, which is
@@ -59,3 +60,8 @@ how a reply becomes a real back-and-forth rather than a one-shot approval.
   app doesn't have).
 
 Add any of these when they're actually missed.
+
+## Testing
+
+Run `node --test tests/*.test.js` (or `npm test`) before restarting the app after
+changes to `server/`. Tests run against a temp data dir and never touch `data/`.
