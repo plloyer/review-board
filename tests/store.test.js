@@ -705,3 +705,13 @@ test("createChangeRequest files a backlog card with taskKind change-request and 
   assert.equal(cr.state, "backlog");
   assert.equal(cr.context, "so I can defer a card");
 });
+
+test("humanThreadNote on a questions-state card moves it back to in_progress (his answer unblocks it)", () => {
+  const { store } = freshStore();
+  const h = store.addHumanMessage("issue", []);
+  store.agentReply(h.id, "need your call", "question");
+  assert.equal(store.list().find((m) => m.id === h.id).state, "questions");
+  store.humanThreadNote(h.id, "voila ma reponse");
+  assert.equal(store.list().find((m) => m.id === h.id).state, "in_progress");
+});
+

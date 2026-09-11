@@ -485,6 +485,9 @@ function humanThreadNote(id, text) {
   if (!msg) throw new Error(`No message ${id}`);
   if (msg.direction !== "human") throw new Error(`Message ${id} is not a human message`);
   msg.thread = [...(msg.thread || []), { from: "human", text, at: new Date().toISOString() }];
+  // His answer IS what a questions-state card was waiting for — it goes back to
+  // work automatically instead of squatting the Questions column answered.
+  if (msg.state === "questions") msg.state = "in_progress";
   save(state);
   emitChange();
   return msg;
