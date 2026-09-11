@@ -269,6 +269,8 @@ header.drag-over { outline: 2px dashed #4a90d9; outline-offset: -2px; }
 .overlay-footer-row { margin-top: 0; }
 
 /* ---------- Mobile ---------- */
+.img-missing { display: inline-block; background: #26262a; border: 1px dashed #44444a; border-radius: 6px; padding: 6px 10px; font-size: 11px; color: #8a8a90; margin: 4px 0; }
+
 @media (max-width: 900px) {
   header h1 { display: none; }
   .btn-label { display: none; }

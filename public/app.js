@@ -294,6 +294,22 @@ function wirePasteToAttach(textarea, key) {
 
 // Focus-proof paste: Ctrl+V with nothing (or something un-wired) focused still
 // attaches to the compose message instead of silently going nowhere.
+// A proof image whose file never reached this machine (agent on another box,
+// path-only attachment) 404s — show a labelled placeholder instead of the
+// browser's broken-image glyph, so the failure explains itself.
+document.addEventListener(
+  "error",
+  (e) => {
+    const img = e.target;
+    if (!(img instanceof HTMLImageElement) || !img.closest("#board, #overlayPanel, #blockHistory")) return;
+    const ph = document.createElement("span");
+    ph.className = "img-missing";
+    ph.textContent = "🖼️ image indisponible — le fichier n'a jamais été téléversé au board";
+    img.replaceWith(ph);
+  },
+  true
+);
+
 document.addEventListener("paste", (e) => {
   if (e.target instanceof Element && e.target.closest("textarea[data-paste-wired]")) return;
   handlePasteAttach(e, "compose");
