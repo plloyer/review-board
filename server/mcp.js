@@ -101,11 +101,17 @@ function missingTextRefs(text) {
   return extractPathRefs(text).filter((p) => !fs.existsSync(p) && !store.isUnderDataDir(path.resolve(p)));
 }
 
+// Bumped whenever a tool contract changes (new tool, changed schema/behavior).
+// Stateless HTTP has no tools/list_changed channel, so the version rides every
+// await_replies trailer instead — a session that connected under an older
+// version learns from the delivery text that its cached tool list is stale.
+const TOOLS_VERSION = "v3";
+
 function buildServer() {
   // The workflow travels with the MCP handshake so every client learns it without
   // needing the repo's WORKFLOW.md (kept in sync with that file, condensed).
   const WORKFLOW_INSTRUCTIONS = [
-    "Review-board workflow. States: backlog -> in_progress -> questions -> approbation -> landing -> closed.",
+    `Review-board workflow (tools ${TOOLS_VERSION}). States: backlog -> in_progress -> questions -> approbation -> landing -> closed.`,
     "Loop: await_replies (at-least-once: acknowledge_messages after reading, or items redeliver; ack = READ, never fixed).",
     "Pick work: the human's feedback backlog cards outrank projet tasks. File your own tasks with create_task.",
     "Dependencies: set_blockers / blocked_by on create_task/move_task (blocked until blockers reach landing/closed; you get a \"débloquée\" delivery). Priority: set_priority / priority 1-3 (1 first).",
@@ -172,7 +178,7 @@ function buildServer() {
               ...formatDelivered(delivered),
               {
                 type: "text",
-                text: `IMPORTANT: after you have read and acted on these, call acknowledge_messages with ids [${ids}] — until you do, they will be re-delivered on every await_replies/check. For a human message, acknowledging only marks it read (it stays on their board until they archive it); once you've fixed what they raised, call reply_to_message to tell them it's resolved.`,
+                text: `IMPORTANT: after you have read and acted on these, call acknowledge_messages with ids [${ids}] — until you do, they will be re-delivered on every await_replies/check. For a human message, acknowledging only marks it read (it stays on their board until they archive it); once you've fixed what they raised, call reply_to_message to tell them it's resolved. [board tools ${TOOLS_VERSION} — if your session connected under an older version, your cached tool list is stale: reconnect the review-board MCP server to pick up new tools]`,
               },
             ],
           };
