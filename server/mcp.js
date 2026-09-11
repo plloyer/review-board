@@ -173,7 +173,7 @@ function buildServer() {
     "acknowledge_messages",
     {
       description:
-        "Confirm receipt of items returned by await_replies (replies AND human messages) after you've read/acted on them. For an agent reply this moves it off the live queue into history. For a human message it only marks it read (a badge on the human's board) and stops it being re-delivered — the card stays on their board until they archive it or you close_issue it once delivered+approved. Also usable after list_messages. After fixing an issue a human filed, call reply_to_message to tell them it's resolved.",
+        "Confirm receipt of items returned by await_replies (replies AND human messages) after you've read/acted on them. Either way this stops re-delivery: an agent reply retires to history only once its card is closed (or has no kanban state); until then, like a human message, it just stops being re-delivered and stays in its column on the board until archived or closed. Also usable after list_messages. After fixing an issue a human filed, call reply_to_message to tell them it's resolved.",
       inputSchema: { ids: z.array(z.string()).min(1) },
     },
     async ({ ids }) => {

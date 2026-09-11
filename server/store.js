@@ -185,6 +185,13 @@ function moveTask(id, newState, note) {
   const msg = state.messages.find((m) => m.id === id);
   if (!msg) throw new Error(`No message ${id}`);
   msg.state = newState;
+  // Closing must also stop redelivery, same as acknowledge() — a card can be closed
+  // without ever having gone through await_replies/acknowledge first.
+  if (newState === "closed") {
+    const now = new Date().toISOString();
+    if (!msg.acknowledgedAt) msg.acknowledgedAt = now;
+    if (!msg.readAt) msg.readAt = now;
+  }
   if (note) msg.thread = [...(msg.thread || []), { from: "agent", text: note, kind: "update", at: new Date().toISOString() }];
   save(state);
   emitChange();
@@ -206,8 +213,12 @@ function reply(id, { text, optionChosen, images, decision }) {
   if (msg.direction !== "agent") throw new Error(`Message ${id} is not an agent message`);
   msg.status = "answered";
   // Approved → landing (visible until the fix reaches the human's build);
-  // anything else = another iteration → back to in_progress.
-  msg.state = decision === "approved" ? "landing" : "in_progress";
+  // anything else = another iteration → back to in_progress. Never backward out of
+  // closed/landing — a card that already shipped or is on its way stays put; the
+  // reply/status are still recorded.
+  if (msg.state !== "closed" && msg.state !== "landing") {
+    msg.state = decision === "approved" ? "landing" : "in_progress";
+  }
   msg.reply = {
     text: text || "",
     optionChosen: optionChosen || null,
@@ -239,7 +250,7 @@ function peekDeliverable() {
 
 function isDeliverable(m) {
   return (
-    (m.direction === "agent" && m.status === "answered") ||
+    (m.direction === "agent" && m.status === "answered" && !m.acknowledgedAt) ||
     (m.direction === "human" && m.status === "open" && !m.acknowledgedAt)
   );
 }
@@ -257,30 +268,30 @@ function withdraw(ids) {
   return before - state.messages.length;
 }
 
-// The agent confirms receipt of a deliverable item. An AGENT reply is done at that
-// point and moves to history, same as before. A HUMAN message is different: it's an
-// issue the human filed, and merely being read shouldn't make it vanish from their
-// board — it stays in the live queue (readAt/acknowledgedAt stamped) but stops being
-// re-delivered. It leaves the board only via archive() (the human's own action) or
+// The agent confirms receipt of a deliverable item. An AGENT reply only retires to
+// history once its kanban state is "closed" (or has no state — legacy data): the
+// columns are the source of truth now, so a card still active elsewhere (questions/
+// in_progress/approbation/landing) stays in the live queue, same as a HUMAN message —
+// acknowledgedAt/readAt stamped so it stops being re-delivered. It leaves the board
+// only via archive() (the human's own action), close_issue/move_task to closed, or
 // withdraw().
 function acknowledge(ids) {
   const idSet = new Set(ids);
   const acked = state.messages.filter((m) => idSet.has(m.id) && isDeliverable(m));
   if (acked.length === 0) return 0;
   const now = new Date().toISOString();
-  // A replyTo human message is a thread reply's delivery vehicle — it has no
-  // card on the board, so once acknowledged it retires to history like an
-  // agent message instead of lingering invisibly in the live queue.
-  const retiring = acked.filter((m) => m.direction === "agent" || m.replyTo);
+  // A replyTo human message is a thread reply's delivery vehicle — it has no card on
+  // the board, so once acknowledged it retires to history like a closed agent card.
+  const retiring = acked.filter((m) => m.replyTo || (m.direction === "agent" && (!m.state || m.state === "closed")));
+  const retiringIds = new Set(retiring.map((m) => m.id));
   for (const m of acked) {
-    if (m.direction === "human" && !m.replyTo) {
+    if (!retiringIds.has(m.id)) {
       m.readAt = now;
       m.acknowledgedAt = now;
     }
   }
   if (retiring.length > 0) {
-    const ackedIds = new Set(retiring.map((m) => m.id));
-    state.messages = state.messages.filter((m) => !ackedIds.has(m.id));
+    state.messages = state.messages.filter((m) => !retiringIds.has(m.id));
     state.history.push(...retiring.map((m) => ({ ...m, deliveredAt: now })));
   }
   save(state);
@@ -324,10 +335,11 @@ function markThreadSeen(id) {
   return msg;
 }
 
-// Human archives their own message off the board, regardless of read state.
+// Human archives any live card off the board, regardless of direction or read state —
+// it's the human's own board-cleanup action.
 function archive(id) {
-  const msg = state.messages.find((m) => m.id === id && m.direction === "human");
-  if (!msg) throw new Error(`No human message ${id}`);
+  const msg = state.messages.find((m) => m.id === id);
+  if (!msg) throw new Error(`No message ${id}`);
   state.messages = state.messages.filter((m) => m.id !== id);
   const now = new Date().toISOString();
   // deliveredAt means "an agent actually received this" — only true if it was ever

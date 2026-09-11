@@ -7,6 +7,12 @@ async function fetchJSON(url, opts) {
 // msg.id -> array of server-side file paths queued to go out with that reply.
 const pendingImages = new Map();
 
+// msg.id -> draft text stranded by a rebuild into a card shape with no textarea
+// (e.g. a column move). reconcileSection stashes here when it can't find a
+// textarea to restore into; it and renderOverlayBody both re-attempt the
+// restore once a textarea for that id exists again.
+const pendingDrafts = new Map();
+
 function imgSrc(p) {
   return `/api/image?path=${encodeURIComponent(p)}`;
 }
@@ -361,6 +367,10 @@ document.addEventListener("paste", (e) => {
 document.addEventListener("dragover", (e) => e.preventDefault());
 document.addEventListener("drop", (e) => e.preventDefault());
 
+// `key` is normally a plain string, fixed for that element's lifetime. Pass a
+// function instead when the element is a persistent node re-rendered in place
+// (the overlay panel) — it's called at drop time so the target always matches
+// whatever composer is currently showing, and the listener is wired only once.
 function wireDropToAttach(el, key) {
   let depth = 0;
   el.addEventListener("dragenter", (e) => {
@@ -377,10 +387,12 @@ function wireDropToAttach(el, key) {
     e.preventDefault();
     depth = 0;
     el.classList.remove("drag-over");
+    const resolvedKey = typeof key === "function" ? key() : key;
+    if (!resolvedKey) return;
     const files = [...(e.dataTransfer?.files || [])].filter((f) => f.type.startsWith("image/"));
     for (const file of files) {
       const path = await uploadFile(file);
-      addPendingImage(key, path);
+      addPendingImage(resolvedKey, path);
     }
   });
 }
@@ -665,11 +677,11 @@ function sentCard(msg, delivered) {
     const thread = msg.thread || [];
     const last = thread[thread.length - 1];
     if (last) {
-      const firstLine = esc(String(last.text || "").split("\n")[0]);
-      if (last.from === "human") return `<span class="ia-reply">↳ Toi : ${firstLine}</span>`;
-      if (last.kind === "question") return `<span class="ia-reply ia-question">❓ L'IA a besoin de toi : ${firstLine}</span>`;
-      if (last.kind === "done") return `<span class="ia-reply ia-done">✅ Terminé — à valider : ${firstLine}</span>`;
-      return `<span class="ia-reply">↳ IA : ${firstLine}</span>`;
+      const snippet = compactSnippet(last.text);
+      if (last.from === "human") return `<span class="ia-reply">↳ Toi : ${snippet}</span>`;
+      if (last.kind === "question") return `<span class="ia-reply ia-question">❓ L'IA a besoin de toi : ${snippet}</span>`;
+      if (last.kind === "done") return `<span class="ia-reply ia-done">✅ Terminé — à valider : ${snippet}</span>`;
+      return `<span class="ia-reply">↳ IA : ${snippet}</span>`;
     }
     if (msg.acknowledgedAt) return "✓ Lu par l'IA · en attente d'une réponse";
     if (delivered || msg.lastDeliveredAt) return "Livré — attend confirmation";
@@ -711,7 +723,7 @@ function sentCard(msg, delivered) {
       el.innerHTML = `
         <div class="issue-row">
           <span class="issue-dot${unseenActionable(msg) ? " actionable" : ""}"></span>
-          <div class="issue-full">${esc(msg.title)}</div>
+          <div class="issue-full">${esc(msg.summary || msg.title)}</div>
           ${cancelBtn}
           <span class="archive-link">Archiver</span>
         </div>
@@ -750,7 +762,7 @@ function sentCard(msg, delivered) {
         <div class="issue-row">
           <span class="issue-dot${unseenActionable(msg) ? " actionable" : ""}"></span>
           <div class="issue-main">
-            <div class="issue-title">${esc(msg.title)}</div>
+            <div class="issue-title">${esc(msg.summary || msg.title)}</div>
             <div class="issue-sub">${subline()}</div>
           </div>
           ${miniThumb}
@@ -990,7 +1002,6 @@ function compactCard(msg) {
       addPendingImage(msg.id, await uploadFile(file));
     });
     wirePasteToAttach(el.querySelector(".reply-text"), msg.id);
-    wireDropToAttach(el, msg.id);
   } else if (msg.state === "questions" && msg.direction === "human") {
     const commentKey = `comment:${msg.id}`;
     const submitComment = () => submitThreadComment(el, ".comment-text", commentKey, msg.title, msg.id);
@@ -1003,7 +1014,6 @@ function compactCard(msg) {
     });
     el.querySelector(".approve-issue-btn")?.addEventListener("click", () => approveIssue(msg));
     wirePasteToAttach(el.querySelector(".comment-text"), commentKey);
-    wireDropToAttach(el, commentKey);
   } else if (msg.state === "approbation") {
     el.querySelector(".approve-btn").addEventListener("click", () => {
       if (msg.direction === "agent") sendReply(msg.id, { decision: "approved", text: "", images: [] });
@@ -1021,6 +1031,9 @@ function compactCard(msg) {
 
   el.querySelectorAll(".growable-text").forEach((ta) => ta.addEventListener("input", () => autoGrow(ta)));
   el.querySelectorAll(".pending-row").forEach((row) => renderPendingChips(row, row.dataset.pendingKey));
+  // Any compact card can receive a dropped image, not just ones with a visible
+  // composer — same key the overlay would attach to for this message.
+  wireDropToAttach(el, msg.direction === "agent" && agentAwaitingDecision(msg) ? msg.id : `comment:${msg.id}`);
 
   // Delegated: click-to-open overlay, mini-thumb, cancel — wired regardless of
   // state. Buttons/textareas/inputs already handled their own click above; this
@@ -1032,7 +1045,7 @@ function compactCard(msg) {
       openLightbox(
         thumb.src,
         msg.direction === "agent" ? msg.id : `comment:${msg.id}`,
-        msg.direction === "agent" ? msg.status !== "answered" : true
+        msg.direction === "agent" ? agentAwaitingDecision(msg) : true
       );
       return;
     }
@@ -1113,12 +1126,16 @@ let openCardId = null;
 function overlayHeader(msg) {
   const dot = dotColor(msg) || "#77777d";
   const kindBadge = msg.direction === "agent" ? `<span class="kind-badge">${esc(msg.kind)}</span>` : "";
-  const { tag: sourceTag, rest: titleRest } = splitSourceTag(msg.title);
+  const { tag: sourceTag, rest: titleRest } = splitSourceTag(msg.summary || msg.title);
+  const subtitle = msg.summary ? `<div class="overlay-subtitle">${esc(msg.title)}</div>` : "";
   return `
     <div class="overlay-head">
       <span class="ccard-dot" style="background:${dot}"></span>
       ${sourceChipHTML(sourceTag)}
-      <strong class="overlay-title">${esc(titleRest)}</strong>
+      <div class="overlay-title-wrap">
+        <strong class="overlay-title">${esc(titleRest)}</strong>
+        ${subtitle}
+      </div>
       ${kindBadge}
       <span class="overlay-badge">${esc(STATE_LABEL[msg.state] || msg.state)}</span>
       ${msg.direction === "human" ? `<span class="archive-link" id="overlayArchive">Archiver</span>` : ""}
@@ -1136,6 +1153,15 @@ function agentAwaitingDecision(msg) {
   return msg.state === "questions" || msg.state === "approbation";
 }
 
+// Shared by overlayAgentBody and overlayHumanBody — one message's thread can
+// carry entries from either side; rendered identically regardless of which
+// body the message ends up in.
+function threadHTML(msg) {
+  return (msg.thread || [])
+    .map((t) => `<div class="thread-entry from-${t.from}">${marked.parse(t.text, { breaks: true })}</div>`)
+    .join("");
+}
+
 function overlayAgentBody(msg) {
   const images = (msg.images || [])
     .map((img) => `<img src="${imgSrc(img.path)}" class="thumb" data-msg-id="${msg.id}" />`)
@@ -1147,6 +1173,7 @@ function overlayAgentBody(msg) {
   const renderedDetails = (msg.details || []).map(renderDetail);
   const detailItems = renderedDetails.filter((r) => !r.block).map((r) => r.html).join("");
   const detailBlocks = renderedDetails.filter((r) => r.block).map((r) => r.html).join("");
+  const thread = threadHTML(msg);
   const followupKey = `followup:${msg.id}`;
   const awaitingDecision = agentAwaitingDecision(msg);
 
@@ -1156,6 +1183,7 @@ function overlayAgentBody(msg) {
     ${detailBlocks}
     ${images ? `<div class="images">${images}</div>` : ""}
     ${videos ? `<div class="videos">${videos}</div>` : ""}
+    ${thread ? `<div class="thread">${thread}</div>` : ""}
   `;
 
   const footerHTML =
@@ -1167,7 +1195,7 @@ function overlayAgentBody(msg) {
         </div>
         <div class="pending-row" data-pending-key="${followupKey}"></div>`
       : `<div class="reply-row overlay-footer-row">
-          ${msg.kind === "review" ? `<button class="approve-btn">✅ Approuver</button>` : ""}
+          ${msg.kind === "review" || msg.state === "approbation" ? `<button class="approve-btn">✅ Approuver</button>` : ""}
           ${options}
           <textarea class="growable-text reply-text" rows="1" placeholder="Commenter… (Ctrl+V ou glisse une image)"></textarea>
           <label class="attach-btn">📎<input type="file" accept="image/*" class="attach-input" hidden /></label>
@@ -1180,9 +1208,7 @@ function overlayAgentBody(msg) {
 
 function overlayHumanBody(msg) {
   const images = (msg.images || []).map((img) => `<img src="${imgSrc(img.path)}" class="thumb" />`).join("");
-  const thread = (msg.thread || [])
-    .map((t) => `<div class="thread-entry from-${t.from}">${marked.parse(t.text, { breaks: true })}</div>`)
-    .join("");
+  const thread = threadHTML(msg);
   const commentKey = `comment:${msg.id}`;
   const approveBtn = isActionableThreadEntry(lastThreadEntry(msg)) ? `<button class="approve-issue-btn">✅ Approuver</button>` : "";
 
@@ -1209,12 +1235,14 @@ function overlaySig(m) {
         m.id,
         m.status,
         m.reply,
+        m.thread,
         Boolean(m.lastDeliveredAt),
         (m.images || []).map((i) => i.path),
         (m.videos || []).map((v) => v.path),
         m.options,
         m.details,
         m.context,
+        m.summary,
         m.title,
         m.state,
       ])
@@ -1223,6 +1251,7 @@ function overlaySig(m) {
         (m.thread || []).length,
         m.thread,
         (m.images || []).map((i) => i.path),
+        m.summary,
         m.title,
         m.state,
         m.acknowledgedAt,
@@ -1236,7 +1265,7 @@ function wireOverlayMedia(panel, msg) {
       openLightbox(
         img.src,
         msg.direction === "agent" ? msg.id : `comment:${msg.id}`,
-        msg.direction === "agent" ? msg.status !== "answered" : true
+        msg.direction === "agent" ? agentAwaitingDecision(msg) : true
       )
     )
   );
@@ -1268,7 +1297,6 @@ function wireOverlayFooter(panel, msg) {
         }
       });
       wirePasteToAttach(panel.querySelector(".followup-text"), followupKey);
-      wireDropToAttach(panel, followupKey);
     } else {
       panel.querySelectorAll(".opt").forEach((btn) =>
         btn.addEventListener("click", () => sendReply(msg.id, { optionChosen: decodeURIComponent(btn.dataset.opt) }))
@@ -1311,7 +1339,6 @@ function wireOverlayFooter(panel, msg) {
         addPendingImage(msg.id, await uploadFile(file));
       });
       wirePasteToAttach(panel.querySelector(".reply-text"), msg.id);
-      wireDropToAttach(panel, msg.id);
     }
   } else {
     const commentKey = `comment:${msg.id}`;
@@ -1326,7 +1353,6 @@ function wireOverlayFooter(panel, msg) {
     });
     panel.querySelector(".approve-issue-btn")?.addEventListener("click", () => approveIssue(msg));
     wirePasteToAttach(panel.querySelector(".comment-text"), commentKey);
-    wireDropToAttach(panel, commentKey);
   }
   panel.querySelectorAll(".pending-row").forEach((row) => renderPendingChips(row, row.dataset.pendingKey));
   panel.querySelectorAll(".growable-text").forEach((ta) => ta.addEventListener("input", () => autoGrow(ta)));
@@ -1340,7 +1366,10 @@ function renderOverlayBody(msg) {
   const prevScroll = panel.querySelector(".overlay-scroll");
   const scrollBefore = prevScroll ? prevScroll.scrollTop : 0;
   const prevTa = panel.querySelector("textarea");
-  const draft = prevTa ? prevTa.value : "";
+  // Keyed to the message the draft belonged to — the panel is a single reused
+  // DOM node, so an unkeyed harvest here would leak card A's draft into card
+  // B's overlay the moment B opens with A's textarea still sitting in the DOM.
+  const sameCardDraft = prevTa && panel.dataset.msgId === String(msg.id) ? prevTa.value : "";
 
   const { bodyHTML, footerHTML } = msg.direction === "agent" ? overlayAgentBody(msg) : overlayHumanBody(msg);
   panel.innerHTML = `${overlayHeader(msg)}<div class="overlay-scroll">${bodyHTML}</div><div class="overlay-footer">${footerHTML}</div>`;
@@ -1350,9 +1379,13 @@ function renderOverlayBody(msg) {
   const scrollEl = panel.querySelector(".overlay-scroll");
   if (scrollEl) scrollEl.scrollTop = scrollBefore;
   const ta = panel.querySelector("textarea");
+  // Same-card typing wins; otherwise fall back to a draft stranded by a column
+  // move into a composer-less card shape (see reconcileSection/pendingDrafts).
+  const draft = sameCardDraft || pendingDrafts.get(String(msg.id)) || "";
   if (ta && draft) {
     ta.value = draft;
     autoGrow(ta);
+    pendingDrafts.delete(String(msg.id));
   }
 
   panel.querySelector("#overlayClose").addEventListener("click", closeOverlay);
@@ -1367,11 +1400,25 @@ function renderOverlayBody(msg) {
 }
 
 function onOverlayKeydown(e) {
-  if (e.key === "Escape") closeOverlay();
+  if (e.key !== "Escape") return;
+  // A lightbox opened from inside the overlay stacks on top of it — Esc closes
+  // just the lightbox first; a second Esc then closes the overlay itself.
+  const lightbox = document.querySelector(".lightbox");
+  if (lightbox) {
+    lightbox.click();
+    return;
+  }
+  closeOverlay();
 }
 
 function openOverlay(msg, cardEl, opts = {}) {
   openCardId = String(msg.id);
+  if (unseenActionable(msg)) {
+    // Optimistic, same as the old expand-in-place behavior: clear the dot
+    // locally so the /seen round-trip doesn't need a rebuild to reflect it.
+    msg.threadSeenAt = new Date().toISOString();
+    fetchJSON(`/api/messages/${msg.id}/seen`, { method: "POST" }).catch(() => {});
+  }
   const backdrop = document.getElementById("overlayBackdrop");
   const panel = document.getElementById("overlayPanel");
   backdrop.hidden = false;
@@ -1417,6 +1464,12 @@ function closeOverlayIfOpen(id) {
 document.getElementById("overlayBackdrop").addEventListener("click", (e) => {
   if (e.target.id === "overlayBackdrop") closeOverlay();
 });
+
+// The panel node persists across every renderOverlayBody() re-render (only its
+// innerHTML is replaced), so wiring this inside wireOverlayFooter would stack a
+// fresh drop listener on every re-render. Wire it once here; the key is read
+// off whichever composer's pending-row is currently in the footer.
+wireDropToAttach(document.getElementById("overlayPanel"), () => document.querySelector("#overlayPanel .pending-row")?.dataset.pendingKey);
 
 // Answered/delivered items (still-queued or already drained into /api/history) are
 // shown only when the toggle is on, and always after the live board. Persisted so
@@ -1471,6 +1524,7 @@ function sentSig(m, delivered) {
     thread.length,
     thread[thread.length - 1],
     (m.images || []).map((i) => i.path),
+    m.summary,
     m.title,
   ]);
 }
@@ -1510,6 +1564,13 @@ function reconcileSection(containerEl, desired, drafts) {
     if (t && t.value === "") {
       t.value = value;
       autoGrow(t);
+      pendingDrafts.delete(id);
+    } else if (!t) {
+      // This card was rebuilt into a shape with no textarea (e.g. moved to a
+      // column whose compact card has no composer) — keep the draft around so
+      // it's still recoverable from the overlay, or restored here once the
+      // card regains a textarea on a later rebuild.
+      pendingDrafts.set(id, value);
     }
   }
 }
@@ -1529,9 +1590,9 @@ async function refresh(force) {
   const [live, history] = await Promise.all([fetchJSON("/api/reviews"), fetchJSON("/api/history")]);
   if (myToken !== refreshToken) return;
 
-  // Stale pendingImages/expandedSent entries (msg archived/deleted elsewhere)
-  // never get cleaned up on their own — prune anything whose id no longer
-  // shows up in either list. "compose" is the one non-msg-id pendingImages key.
+  // Stale pendingImages/expandedSent/pendingDrafts entries (msg archived/deleted
+  // elsewhere) never get cleaned up on their own — prune anything whose id no
+  // longer shows up in either list. "compose" is the one non-msg-id pendingImages key.
   const liveAndHistoryIds = new Set([...live, ...history].map((m) => String(m.id)));
   for (const key of [...pendingImages.keys()]) {
     if (key === "compose") continue;
@@ -1540,6 +1601,9 @@ async function refresh(force) {
   }
   for (const id of [...expandedSent]) {
     if (!liveAndHistoryIds.has(id)) expandedSent.delete(id);
+  }
+  for (const id of [...pendingDrafts.keys()]) {
+    if (!liveAndHistoryIds.has(id)) pendingDrafts.delete(id);
   }
 
   // Every live card that belongs on the board carries a kanban `state` (a
@@ -1579,6 +1643,11 @@ async function refresh(force) {
     const holder = t.closest("[data-msg-id]");
     if (t.value !== "") drafts[holder.dataset.msgId] = t.value;
   });
+  // Anything stranded by an earlier tick's rebuild (no textarea to land in at
+  // the time) rides along too, so it keeps getting retried until one reappears.
+  for (const [id, value] of pendingDrafts) {
+    if (!(id in drafts)) drafts[id] = value;
+  }
 
   // A card rebuilt/inserted/removed above the viewport shifts every card below
   // it, dragging the scroll position along even though the card the user is

@@ -129,25 +129,37 @@ test("peekDeliverable returns answered-agent + open-human items and is at-least-
   assert.deepEqual(second.map((m) => m.id).sort(), ids);
 });
 
-test("acknowledge moves an agent reply to history, but keeps a human message in the live queue (marked read, not re-delivered)", () => {
+test("acknowledge keeps an active-state agent card (and a human message) in the live queue, stamped so redelivery stops", () => {
   const { store } = freshStore();
   const a1 = store.addAgentMessage({ title: "Review this" });
-  store.reply(a1.id, { text: "ok" });
+  store.reply(a1.id, { text: "ok" }); // -> state in_progress: active, not closed
   const h1 = store.addHumanMessage("a question", []);
 
   const count = store.acknowledge([a1.id, h1.id]);
   assert.equal(count, 2);
-  assert.deepEqual(store.peekDeliverable(), []);
+  assert.deepEqual(store.peekDeliverable(), [], "acknowledged items must not be re-delivered");
+  assert.equal(store.history().length, 0, "an active-state agent card must stay on the board, not retire to history");
 
-  const hist = store.history();
-  assert.deepEqual(hist.map((m) => m.id), [a1.id]);
-  assert.ok(hist[0].deliveredAt);
+  const stillAgent = store.list().find((m) => m.id === a1.id);
+  assert.ok(stillAgent, "agent card stays in its column after ack");
+  assert.equal(stillAgent.state, "in_progress");
+  assert.ok(stillAgent.acknowledgedAt);
+  assert.ok(stillAgent.readAt);
 
-  const stillListed = store.list().find((m) => m.id === h1.id);
-  assert.ok(stillListed, "human message stays in the live queue after ack");
-  assert.equal(stillListed.status, "open");
-  assert.ok(stillListed.acknowledgedAt);
-  assert.ok(stillListed.readAt);
+  const stillHuman = store.list().find((m) => m.id === h1.id);
+  assert.ok(stillHuman, "human message stays in the live queue after ack");
+  assert.equal(stillHuman.status, "open");
+  assert.ok(stillHuman.acknowledgedAt);
+  assert.ok(stillHuman.readAt);
+});
+
+test("acknowledge still retires a replyTo delivery-vehicle message regardless of state", () => {
+  const { store } = freshStore();
+  const vehicle = store.addHumanMessage("approved", [], "r1");
+  const count = store.acknowledge([vehicle.id]);
+  assert.equal(count, 1);
+  assert.equal(store.list().find((m) => m.id === vehicle.id), undefined);
+  assert.ok(store.history().find((m) => m.id === vehicle.id));
 });
 
 test("acknowledge of a non-deliverable id is a no-op", () => {
@@ -167,10 +179,15 @@ test("withdraw removes a message entirely", () => {
   assert.equal(store.list().length, 0);
 });
 
-test("history() returns acknowledged agent replies", () => {
+test("history() returns acknowledged agent replies once their card's state is closed", () => {
   const { store } = freshStore();
   const a1 = store.addAgentMessage({ title: "Review this" });
   store.reply(a1.id, { text: "ok" });
+  // moveTask(..., "closed") itself stamps acknowledgedAt (see its own test below), so
+  // to exercise acknowledge()'s closed-state retirement rule in isolation, set state
+  // directly here — simulating a card whose closed state predates that stamp (e.g.
+  // pre-existing data written by an older version).
+  store.list().find((m) => m.id === a1.id).state = "closed";
   store.acknowledge([a1.id]);
   assert.equal(store.history().length, 1);
   assert.equal(store.history()[0].id, a1.id);
@@ -241,10 +258,14 @@ test("archive stamps deliveredAt (in addition to archivedAt) when the message ha
   assert.ok(hist[0].deliveredAt);
 });
 
-test("archive throws on an unknown or non-human id", () => {
+test("archive works on any live card (agent included); only an unknown id throws", () => {
   const { store } = freshStore();
   const a1 = store.addAgentMessage({ title: "Review this" });
-  assert.throws(() => store.archive(a1.id));
+  const archived = store.archive(a1.id);
+  assert.equal(archived.id, a1.id);
+  assert.equal(store.list().find((m) => m.id === a1.id), undefined);
+  assert.ok(store.history().find((m) => m.id === a1.id).archivedAt);
+
   assert.throws(() => store.archive("u999"));
 });
 
@@ -340,6 +361,36 @@ test("moveTask throws on an unknown id or an unknown state", () => {
   const task = store.createTask({ title: "Do the thing" });
   assert.throws(() => store.moveTask("u999", "in_progress"));
   assert.throws(() => store.moveTask(task.id, "not-a-real-state"));
+});
+
+test("moveTask to closed stamps acknowledgedAt/readAt if absent (stopping redelivery) but does not overwrite existing stamps", () => {
+  const { store } = freshStore();
+  const a1 = store.addAgentMessage({ title: "Review this" });
+  store.reply(a1.id, { text: "ok", decision: "approved" }); // -> landing, status answered
+  store.moveTask(a1.id, "closed");
+  const closed = store.list().find((m) => m.id === a1.id);
+  assert.ok(closed.acknowledgedAt);
+  assert.ok(closed.readAt);
+  assert.deepEqual(store.peekDeliverable(), [], "closing stops redelivery even without an explicit acknowledge");
+
+  const before = closed.acknowledgedAt;
+  store.moveTask(a1.id, "closed", "re-closed, no-op note");
+  assert.equal(store.list().find((m) => m.id === a1.id).acknowledgedAt, before, "must not overwrite an existing acknowledgedAt");
+});
+
+test("reply() does not move state backward out of closed or landing, but still records the reply", () => {
+  const { store } = freshStore();
+  const a1 = store.addAgentMessage({ title: "Review this", kind: "review" });
+  store.moveTask(a1.id, "closed");
+  const replied = store.reply(a1.id, { text: "still fine", decision: "iteration" });
+  assert.equal(replied.state, "closed", "must not move backward to in_progress");
+  assert.equal(replied.status, "answered");
+  assert.equal(replied.reply.text, "still fine");
+
+  const a2 = store.addAgentMessage({ title: "Another", kind: "review" });
+  store.reply(a2.id, { text: "ok", decision: "approved" }); // -> landing
+  const replied2 = store.reply(a2.id, { text: "re-approved", decision: "approved" });
+  assert.equal(replied2.state, "landing", "must stay in landing, not bounce");
 });
 
 test("setSummary sets msg.summary", () => {
