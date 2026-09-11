@@ -1,5 +1,6 @@
-body { font-family: system-ui, sans-serif; margin: 0; background: #151517; color: #ecebe8; }
-header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: #151517; border-bottom: 1px solid #2a2a2e; position: sticky; top: 0; }
+html, body { height: 100%; }
+body { font-family: system-ui, sans-serif; margin: 0; background: #151517; color: #ecebe8; display: flex; flex-direction: column; }
+header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: #151517; border-bottom: 1px solid #2a2a2e; flex-shrink: 0; }
 header h1 { font-size: 16px; margin: 0; flex-shrink: 0; }
 #compose { display: flex; flex: 1; gap: 8px; }
 #composeText { flex: 1; }
@@ -18,19 +19,116 @@ header h1 { font-size: 16px; margin: 0; flex-shrink: 0; }
 }
 button { cursor: pointer; border: 1px solid #555; background: #333; color: #eee; border-radius: 8px; padding: 6px 10px; }
 button:hover { background: #444; }
-main { padding: 0 20px 16px; display: flex; flex-direction: column; gap: 0; }
+#composeChips { display: flex; gap: 8px; padding: 0 16px; flex-shrink: 0; }
+#composeChips:not(:empty) { padding-bottom: 12px; }
+#notifyStatus { margin: 0 16px 12px; padding: 8px 12px; background: #2a2a2d; border-radius: 6px; font-size: 13px; color: #ccc; flex-shrink: 0; }
+
+/* ---------- Kanban board ---------- */
+#board { flex: 1; min-height: 0; display: flex; gap: 12px; padding: 14px 20px 0; overflow: hidden; }
+
+.col-rail {
+  width: 44px;
+  background: #19191c;
+  border: 1px solid #26262a;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.col-rail:hover { background: #1d1d20; }
+.col-rail[hidden] { display: none; }
+
+/* Thin, dark scrollbars — the default Windows ones scream in this palette. */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #2e2e33; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #44444a; }
+.col-rail .rail-count { background: #333338; color: #b6b6bc; border-radius: 10px; padding: 0 7px; font-size: 11px; font-weight: 700; }
+.col-rail .rail-count:empty { display: none; }
+.col-rail .rail-label { writing-mode: vertical-rl; font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; color: #8a8a90; font-weight: 700; }
+
+.column { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.column[hidden] { display: none; }
+/* An empty column has nothing to show but its header and the "—" placeholder —
+   let non-empty columns share the freed-up width instead. */
+.column.empty-col { flex: 0 0 120px; }
+.column-header { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.column-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; color: var(--accent, #ecebe8); }
+.column-count { background: var(--accent-bg, #333338); color: var(--accent-fg, #b6b6bc); border-radius: 10px; padding: 0 7px; font-size: 11px; font-weight: 700; }
+.column-count:empty { display: none; }
+.column-hint { font-size: 10px; color: var(--accent, #8a8a90); }
+.column-collapse { margin-left: auto; cursor: pointer; color: #77777d; font-size: 13px; padding: 0 2px; }
+.column-collapse:hover { color: #ecebe8; }
+.column-collapse-right { margin-left: 0; }
+#col-backlog .column-header { --accent: #8a8a90; }
+#col-in_progress .column-header { --accent: #4a90d9; }
+#col-in_progress .column-count { --accent-bg: #1c3450; --accent-fg: #7db3e8; }
+#col-questions .column-header { --accent: #d9a441; }
+#col-questions .column-count { --accent-bg: #d9a441; --accent-fg: #1a1a1c; }
+#col-approbation .column-header { --accent: #6cbf6c; }
+#col-approbation .column-count { --accent-bg: #2b4a2b; --accent-fg: #9fd49f; }
+#col-landing .column-header { --accent: #b08fd9; }
+#col-landing .column-count { --accent-bg: #322845; --accent-fg: #c9aef0; }
+#col-closed .column-header { --accent: #77777d; }
+
+.column-cards { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-bottom: 8px; min-height: 0; }
+.column-cards.empty::after { content: "—"; display: block; text-align: center; padding: 8px 0; color: #55555a; font-size: 12px; }
+
+/* ---------- Compact card ---------- */
+.ccard { background: #1d1d20; border: 1px solid #33333a; border-radius: 10px; padding: 9px 12px; cursor: pointer; }
+.ccard.drag-over { outline: 2px dashed #4a90d9; outline-offset: -2px; }
+#col-backlog .ccard, #cards-backlog .ccard { background: #1a1f1a; border-color: #2b3a2b; }
+#col-questions .ccard { background: #221d14; border-color: #4a3d17; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4); }
+#col-approbation .ccard { background: #1a1f1a; border-color: #3a5a3a; }
+#col-landing .ccard { background: #1e1a24; border-color: #3a2f4d; }
+#col-closed .ccard { opacity: 0.9; }
+.ccard-row { display: flex; align-items: center; gap: 8px; }
+.ccard-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+/* The title is the most informative line on the card — give it up to 2 lines
+   before clipping instead of squeezing it onto one. */
+.ccard-title { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; line-height: 1.35; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.chip { font-size: 10px; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; flex-shrink: 0; }
+.chip-feedback { background: #2b4a2b; color: #9fd49f; }
+.chip-projet { background: #333338; color: #b6b6bc; }
+.chip-source { background: #2e3b45; color: #9db8c9; }
+.ccard .mini-thumb { width: 44px; height: 28px; object-fit: cover; border-radius: 4px; flex-shrink: 0; cursor: zoom-in; }
+/* Body text stays neutral even in tinted cards — the accent lives in the dot,
+   the column header, and the ❓/✅ glyphs; colored-text-on-colored-background
+   is tiring to read. */
+/* Capped at 2 lines — the JS side already caps the text at 200 plain-text
+   chars, this is the visual backstop so a long single word/line can't blow
+   past the compact card's height. */
+.ccard-sub {
+  font-size: 11px;
+  color: #a0a0a6;
+  margin-top: 4px;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.ccard-sub.sub-human, .ccard-sub.sub-question, .ccard-sub.sub-done { color: #a0a0a6; }
+.ccard-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; align-items: center; }
+.ccard-actions .reply-text, .ccard-actions .comment-text { flex: 1; min-width: 100px; font-size: 11px; }
+
+/* ---------- Shared (also used inside the History section's full cards) ---------- */
 .section-block:empty, .section-block.hidden { display: none; }
-.section-header { display: flex; align-items: center; gap: 8px; padding: 14px 0 8px; }
+.section-header { display: flex; align-items: center; gap: 8px; padding: 14px 20px 8px; }
 .section-header .section-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; color: var(--accent, #ecebe8); }
 .section-header.muted .section-title { color: #77777d; }
 .section-header .section-count { background: var(--accent, #666); color: #1a1a1c; border-radius: 10px; padding: 0 7px; font-size: 11px; font-weight: 700; }
 .section-header .section-count:empty { display: none; }
-.section-header.issue .section-count { background: #2b4a2b; color: #9fd49f; }
 .section-header .section-rule { flex: 1; height: 1px; background: #2a2a2e; }
 .section-header .history-hint { font-size: 12px; color: #77777d; cursor: pointer; }
 .section-header .history-hint:hover { color: #a0a0a6; }
-.section-cards { display: flex; flex-direction: column; gap: 8px; padding-bottom: 8px; }
+.section-cards { display: flex; flex-direction: column; gap: 8px; padding: 0 20px 8px; }
 .section-cards:empty { display: none; }
+#blockHistory { flex-shrink: 0; max-height: 260px; overflow-y: auto; }
 .card { background: #1d1d20; border: 1px solid #33333a; border-radius: 12px; padding: 14px 16px; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35); }
 .card.answered { opacity: 0.5; }
 .card.drag-over { outline: 2px dashed #4a90d9; outline-offset: -2px; }
@@ -55,20 +153,17 @@ header.drag-over { outline: 2px dashed #4a90d9; outline-offset: -2px; }
 .images img { max-width: 320px; max-height: 240px; border-radius: 6px; border: 1px solid #444; cursor: zoom-in; }
 .videos { margin: 8px 0; }
 .videos video { max-width: 100%; max-height: 480px; border-radius: 6px; border: 1px solid #444; }
-.lightbox { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.85); display: flex; align-items: center; justify-content: center; overflow: hidden; z-index: 100; }
+.lightbox { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.85); display: flex; align-items: center; justify-content: center; overflow: hidden; z-index: 300; }
 .lightbox-wrap { position: relative; cursor: grab; line-height: 0; touch-action: none; }
 .lightbox-wrap img { display: block; -webkit-user-drag: none; user-select: none; max-width: calc(100vw - 40px); max-height: calc(100vh - 100px); width: auto; height: auto; }
 .annotate-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
 .annotate-canvas.active { pointer-events: auto; cursor: crosshair; }
-.lightbox-toolbar { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; z-index: 101; }
+.lightbox-toolbar { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; z-index: 301; }
 .lightbox-toolbar button.active { background: #ff3b30; border-color: #ff3b30; }
 .attach-btn { display: inline-flex; align-items: center; padding: 6px 10px; border: 1px solid #555; border-radius: 6px; cursor: pointer; }
 .attach-btn:hover { background: #444; }
 .pending-row { display: flex; gap: 8px; margin-top: 8px; }
 .pending-row:empty { display: none; margin-top: 0; }
-#composeChips { display: flex; gap: 8px; padding: 0 16px; }
-#composeChips:not(:empty) { padding-bottom: 12px; }
-#notifyStatus { margin: 0 16px 12px; padding: 8px 12px; background: #2a2a2d; border-radius: 6px; font-size: 13px; color: #ccc; }
 .pending-chip { position: relative; display: inline-block; }
 .pending-chip img { width: 60px; height: 45px; object-fit: cover; border-radius: 4px; border: 1px solid #444; }
 .pending-chip .remove-pending { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; padding: 0; line-height: 1; border-radius: 50%; font-size: 12px; }
@@ -89,9 +184,7 @@ header.drag-over { outline: 2px dashed #4a90d9; outline-offset: -2px; }
 .issue-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
 .issue-full { flex: 1; min-width: 0; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 .issue-sub { font-size: 11px; color: #8a8a90; margin-top: 2px; }
-.issue-sub .ia-reply { color: #9fd49f; }
-.issue-sub .ia-reply.ia-question { color: #d9a441; }
-.issue-sub .ia-reply.ia-done { color: #6cbf6c; }
+.issue-sub .ia-reply, .issue-sub .ia-reply.ia-question, .issue-sub .ia-reply.ia-done { color: #a5a5ab; }
 .mini-thumb { width: 56px; height: 34px; object-fit: cover; border-radius: 6px; flex-shrink: 0; cursor: zoom-in; }
 .archive-link { font-size: 12px; color: #8a8a90; text-decoration: underline; cursor: pointer; flex-shrink: 0; }
 .archive-link:hover { color: #ecebe8; }
@@ -101,12 +194,60 @@ header.drag-over { outline: 2px dashed #4a90d9; outline-offset: -2px; }
 .thread-entry { margin: 4px 0; }
 .thread img { max-width: 320px; max-height: 240px; border-radius: 6px; border: 1px solid #444; cursor: zoom-in; display: block; margin: 6px 0; }
 .thread .from-agent { color: #ccc; font-size: 13px; }
-.thread .from-human { color: #9fd49f; }
+/* The human's own entries: neutral text, just a subtle green edge to tell the
+   two voices apart without green-on-green reading strain. */
+.thread .from-human { color: #d7d7dc; border-left: 2px solid #3a5a3a; padding-left: 8px; }
 
-#toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #7a2e2e; color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 13px; opacity: 0; pointer-events: none; transition: opacity 0.3s; z-index: 200; }
+#toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #7a2e2e; color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 13px; opacity: 0; pointer-events: none; transition: opacity 0.3s; z-index: 400; }
 #toast.visible { opacity: 1; }
 
-@media (max-width: 700px) {
+/* ---------- Expanded overlay ---------- */
+.overlay-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); display: flex; align-items: center; justify-content: center; z-index: 150; }
+.overlay-backdrop[hidden] { display: none; }
+.overlay-panel {
+  width: 75vw;
+  max-width: 1080px;
+  height: 85vh;
+  background: #1d1d20;
+  border: 1px solid #33333a;
+  border-radius: 14px;
+  box-shadow: 0 12px 60px rgba(0, 0, 0, 0.7);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transform-origin: top left;
+}
+.overlay-head { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid #2a2a2e; flex-shrink: 0; }
+.overlay-head .ccard-dot { width: 10px; height: 10px; }
+.overlay-title { flex: 1; min-width: 0; font-size: 14px; overflow-wrap: anywhere; }
+.overlay-badge { font-size: 11px; text-transform: uppercase; background: #333338; color: #b6b6bc; padding: 2px 8px; border-radius: 4px; flex-shrink: 0; }
+.overlay-close { width: 26px; height: 26px; padding: 0; line-height: 1; border-radius: 50%; flex-shrink: 0; }
+.overlay-scroll { flex: 1; overflow-y: auto; padding: 16px 18px; }
+.overlay-footer { padding: 12px 18px; border-top: 1px solid #2a2a2e; flex-shrink: 0; }
+.overlay-footer-row { margin-top: 0; }
+
+/* ---------- Mobile ---------- */
+@media (max-width: 900px) {
   header h1 { display: none; }
   .btn-label { display: none; }
+
+  html, body { height: auto; }
+  body { display: block; }
+  #board { flex-direction: column; overflow: visible; padding: 0 14px; gap: 0; }
+  .col-rail { display: none !important; }
+  .column[hidden] { display: flex !important; }
+  .column { padding: 16px 0 8px; }
+  .column-cards { overflow: visible; }
+  .column-collapse { display: none; }
+  [data-state="questions"] { order: 1; }
+  [data-state="approbation"] { order: 2; }
+  [data-state="in_progress"] { order: 3; }
+  [data-state="landing"] { order: 4; }
+  [data-state="backlog"] { order: 5; }
+  [data-state="closed"] { order: 6; }
+
+  #blockHistory { max-height: none; overflow: visible; }
+  .section-header, .section-cards { padding-left: 14px; padding-right: 14px; }
+
+  .overlay-panel { width: 94vw; height: 90vh; }
 }

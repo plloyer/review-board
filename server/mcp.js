@@ -132,7 +132,7 @@ function buildServer() {
       inputSchema: {},
     },
     async () => {
-      const rows = store.list().map((m) => `[${m.id}] ${m.direction}/${m.kind}/${m.status}: ${m.title}`);
+      const rows = store.list().map((m) => `[${m.id}] ${m.direction}/${m.kind}/${m.status}/${m.state || "-"}: ${m.title}`);
       return { content: [{ type: "text", text: rows.length ? rows.join("\n") : "Queue is empty" }] };
     }
   );
@@ -186,7 +186,7 @@ function buildServer() {
     "reply_to_message",
     {
       description:
-        "Reply under the human's message/issue on their board (e.g. \"fixed in <sha>\"). This is how you tell the human an issue they filed is resolved — acknowledge_messages only marks it read, it no longer removes it from their board. When the human has approved AND the fix is delivered, finish with close_issue.",
+        "Reply under the human's message/issue on their board (e.g. \"fixed in <sha>\"). This is how you tell the human an issue they filed is resolved — acknowledge_messages only marks it read, it no longer removes it from their board. Kind 'question' also moves the card to state questions; kind 'done' moves it to approbation. When the human has approved AND the fix is delivered, finish with close_issue.",
       inputSchema: {
         id: z.string(),
         text: z.string(),
@@ -194,12 +194,14 @@ function buildServer() {
           .enum(["update", "question", "done"])
           .default("update")
           .describe(
-            "kind: 'update' (default) for routine progress notes — silent, no notification; 'question' when you need the human's input to continue — pings them; 'done' when the work on this issue is complete and awaits their validation — pings them."
+            "kind: 'update' (default) for routine progress notes — silent, no notification; 'question' when you need the human's input to continue — pings them and moves the card to questions; 'done' when the work on this issue is complete and awaits their validation — pings them and moves the card to approbation."
           ),
       },
     },
     async ({ id, text, kind }) => {
       store.agentReply(id, text, kind);
+      if (kind === "question") store.moveTask(id, "questions");
+      else if (kind === "done") store.moveTask(id, "approbation");
       return { content: [{ type: "text", text: `Replied to ${id}` }] };
     }
   );
@@ -208,16 +210,49 @@ function buildServer() {
     "close_issue",
     {
       description:
-        "Close one of the human's issues once its loop is fully done — the fix is DELIVERED and the human approved it. This archives the card off their board into history. Never close an issue that is merely acknowledged or approved-but-not-delivered; keep replying with reply_to_message until delivery is confirmed. Optional note: a final line recorded in the thread.",
+        "Mark a task as present in the human's current build (state closed). He retests it there and archives it himself — this does NOT remove the card from his board. Never close before the fix is actually delivered in his build. Optional note: a final line recorded in the thread.",
       inputSchema: {
         id: z.string(),
         note: z.string().optional(),
       },
     },
     async ({ id, note }) => {
-      if (note) store.agentReply(id, note, "update");
-      store.archive(id);
+      store.moveTask(id, "closed", note);
       return { content: [{ type: "text", text: `Closed ${id}` }] };
+    }
+  );
+
+  server.registerTool(
+    "create_task",
+    {
+      description:
+        "Add a project task to the human's backlog (state backlog). His feedback cards always outrank project tasks — work feedback first.",
+      inputSchema: {
+        title: z.string(),
+        context: z.string().optional(),
+        project: z.string().optional(),
+      },
+    },
+    async ({ title, context, project }) => {
+      const msg = store.createTask({ title, context, project });
+      return { content: [{ type: "text", text: msg.id }] };
+    }
+  );
+
+  server.registerTool(
+    "move_task",
+    {
+      description:
+        "Move a task through the board: backlog -> in_progress (you started) -> questions (you need the human — prefer asking via reply_to_message kind question, which moves it automatically) -> approbation (done, proof attached, awaiting his approval) -> landing (approved AND merged) -> closed (present in the build he runs). Optional note lands in the thread.",
+      inputSchema: {
+        id: z.string(),
+        state: z.enum(store.TASK_STATES),
+        note: z.string().optional(),
+      },
+    },
+    async ({ id, state, note }) => {
+      store.moveTask(id, state, note);
+      return { content: [{ type: "text", text: `Moved ${id} to ${state}` }] };
     }
   );
 

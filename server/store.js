@@ -7,6 +7,33 @@ const { EventEmitter } = require("events");
 const DATA_DIR = process.env.REVIEW_BOARD_DATA_DIR || path.join(__dirname, "..", "data");
 const DATA_FILE = path.join(DATA_DIR, "messages.json");
 
+// Kanban states a task/card moves through. Agent-initiated r-cards (review/question/note)
+// and human-filed cards (feedback + agent-created project tasks) all carry one of these.
+const TASK_STATES = ["backlog", "in_progress", "questions", "approbation", "landing", "closed"];
+// A note is a progress update, not a question — it must never land in the
+// "questions" column (PL: a question card has to actually contain a question).
+const KIND_TO_STATE = { question: "questions", review: "approbation", note: "in_progress" };
+
+// One-time migration for messages saved before `state` existed. Human replyTo messages
+// are thread-reply delivery vehicles, never rendered as their own card, so they're left
+// out of task-land entirely (no state). Mutates in place; the caller saves on next write.
+function migrateStates(s) {
+  for (const m of s.messages) {
+    if (m.state) continue;
+    if (m.direction === "human") {
+      if (m.replyTo) continue;
+      const thread = m.thread || [];
+      const last = thread[thread.length - 1];
+      if (last && last.from === "agent" && last.kind === "question") m.state = "questions";
+      else if (last && last.from === "agent" && last.kind === "done") m.state = "approbation";
+      else m.state = "in_progress";
+    } else if (m.direction === "agent") {
+      m.state = KIND_TO_STATE[m.kind] || "questions";
+    }
+  }
+  return s;
+}
+
 function load() {
   let raw;
   try {
@@ -17,7 +44,7 @@ function load() {
   try {
     const s = JSON.parse(raw);
     if (!s.history) s.history = []; // back-compat with files written before history existed
-    return s;
+    return migrateStates(s);
   } catch (err) {
     // File exists but is corrupt (e.g. killed mid-write) — never silently drop it.
     const backup = `${DATA_FILE}.corrupt-${Date.now()}`;
@@ -87,6 +114,7 @@ function addAgentMessage({ title, kind = "review", options, context, details, im
     videos: (videos || []).map(ingestFile),
     project: project || "",
     status: "open",
+    state: KIND_TO_STATE[kind] || "questions",
     createdAt: new Date().toISOString(),
     reply: null,
   };
@@ -111,7 +139,62 @@ function addHumanMessage(text, images, replyTo) {
     status: "open",
     createdAt: new Date().toISOString(),
   };
+  // A replyTo message is a delivery vehicle, not a card — it stays out of task-land.
+  if (!replyTo) {
+    msg.taskKind = "feedback";
+    msg.state = "backlog";
+  }
   state.messages.push(msg);
+  save(state);
+  emitChange();
+  return msg;
+}
+
+// A project task the agent files for itself. Reuses the human-message shape
+// (direction "human") purely so the existing thread/seen/archive machinery
+// (agentReply, humanThreadNote, markThreadSeen, archive) works on it unmodified;
+// `createdBy` marks the origin and `taskKind` tells it apart from filed feedback.
+function createTask({ title, context, project }) {
+  const id = `u${state.nextHumanId++}`;
+  const msg = {
+    id,
+    direction: "human",
+    kind: "message",
+    title,
+    context: context || "",
+    project: project || "",
+    images: [],
+    replyTo: null,
+    createdBy: "agent",
+    taskKind: "projet",
+    state: "backlog",
+    thread: [],
+    status: "open",
+    createdAt: new Date().toISOString(),
+  };
+  state.messages.push(msg);
+  save(state);
+  emitChange();
+  return msg;
+}
+
+// Moves a task/card to a new kanban state, optionally dropping a thread note
+// (same shape agentReply appends). Works on any card id, human or agent-created.
+function moveTask(id, newState, note) {
+  if (!TASK_STATES.includes(newState)) throw new Error(`Unknown state ${newState}`);
+  const msg = state.messages.find((m) => m.id === id);
+  if (!msg) throw new Error(`No message ${id}`);
+  msg.state = newState;
+  if (note) msg.thread = [...(msg.thread || []), { from: "agent", text: note, kind: "update", at: new Date().toISOString() }];
+  save(state);
+  emitChange();
+  return msg;
+}
+
+function setSummary(id, text) {
+  const msg = state.messages.find((m) => m.id === id);
+  if (!msg) throw new Error(`No message ${id}`);
+  msg.summary = text;
   save(state);
   emitChange();
   return msg;
@@ -122,6 +205,9 @@ function reply(id, { text, optionChosen, images, decision }) {
   if (!msg) throw new Error(`No message ${id}`);
   if (msg.direction !== "agent") throw new Error(`Message ${id} is not an agent message`);
   msg.status = "answered";
+  // Approved → landing (visible until the fix reaches the human's build);
+  // anything else = another iteration → back to in_progress.
+  msg.state = decision === "approved" ? "landing" : "in_progress";
   msg.reply = {
     text: text || "",
     optionChosen: optionChosen || null,
@@ -256,8 +342,12 @@ function archive(id) {
 
 module.exports = {
   DATA_DIR,
+  TASK_STATES,
   addAgentMessage,
   addHumanMessage,
+  createTask,
+  moveTask,
+  setSummary,
   reply,
   list,
   peekDeliverable,

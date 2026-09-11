@@ -17,6 +17,35 @@ function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
 
+// Renders markdown to HTML then reads it back as plain text (via a detached
+// element's textContent) — strips `**`/`#`/`[text](url)`/etc noise instead of
+// just taking the raw first line, which used to let markdown syntax leak into
+// compact surfaces.
+function mdToPlainText(s) {
+  const tmp = document.createElement("div");
+  tmp.innerHTML = marked.parse(String(s ?? ""), { breaks: true });
+  return (tmp.textContent || "").replace(/\s+/g, " ").trim();
+}
+
+// Shared cap for any body text shown in compact mode (subline, inline question
+// context): plain text, no markdown, max 200 chars. Escaped for interpolation.
+function compactSnippet(s) {
+  return esc(mdToPlainText(s).slice(0, 200));
+}
+
+// A title can start with a "[Tag] " prefix meant to render as a small source
+// chip rather than literal text — the raw title/summary in the message data
+// is never touched, only the rendered HTML splits it.
+const SOURCE_TAG_RE = /^\[([^\]]{1,16})\]\s*/;
+function splitSourceTag(title) {
+  const s = String(title ?? "");
+  const m = s.match(SOURCE_TAG_RE);
+  return m ? { tag: m[1], rest: s.slice(m[0].length) } : { tag: null, rest: s };
+}
+function sourceChipHTML(tag) {
+  return tag ? `<span class="chip chip-source">${esc(tag)}</span>` : "";
+}
+
 // Last thread entry that's an AI question/done — the one shape that needs the
 // human back. Split from the "unseen" check below so the Approuver button can
 // use just the shape (regardless of seen state) while badges/routing use both.
@@ -31,19 +60,12 @@ function unseenActionable(msg) {
   const last = lastThreadEntry(msg);
   return isActionableThreadEntry(last) && last.at > (msg.threadSeenAt || "");
 }
-// Section routing: an issue sits in "À toi de répondre" as long as the LAST
-// thread entry is an actionable agent one — merely opening it (seen) doesn't
-// answer it; only the human's own reply/approval (a from:"human" entry) or an
-// agent follow-up moves it back down.
-function needsHuman(msg) {
-  return isActionableThreadEntry(lastThreadEntry(msg));
-}
 
 // Same breakpoint as the mobile layout in style.css: on a phone, Enter should just
 // type a newline (no convenient Shift key on the on-screen keyboard) — Send is the
 // only way to submit. On desktop, Enter submits and Shift+Enter is the newline.
 function submitsOnEnter(e) {
-  return e.key === "Enter" && !e.shiftKey && !window.matchMedia("(max-width: 700px)").matches;
+  return e.key === "Enter" && !e.shiftKey && !window.matchMedia("(max-width: 900px)").matches;
 }
 
 // Grows a textarea to fit its content; CSS max-height (5 lines) plus overflow-y:
@@ -53,10 +75,10 @@ function autoGrow(el) {
   el.style.height = `${el.scrollHeight}px`;
 }
 
-// Shared by card()'s follow-up box and sentCard()'s comment box — same POST,
-// just a different textarea selector / pendingImages key. Snapshot + clear the
-// textarea and pending images BEFORE the await so a second Enter/click can't
-// double-send; restore both on failure.
+// Shared by every reply/comment/followup textarea (compact card, overlay footer) —
+// same POST, just a different textarea selector / pendingImages key. Snapshot +
+// clear the textarea and pending images BEFORE the await so a second Enter/click
+// can't double-send; restore both on failure.
 async function submitThreadComment(el, textSelector, key, title, threadMsgId) {
   const ta = el.querySelector(textSelector);
   const text = ta.value.trim();
@@ -98,6 +120,17 @@ async function submitThreadComment(el, textSelector, key, title, threadMsgId) {
   }
 }
 
+// Shared by card() and the overlay's agent body: a detail line renders as a list
+// item unless it's block-level markdown (headings/lists/multiple paragraphs), in
+// which case it gets its own block instead of being crammed into a bullet.
+function renderDetail(d) {
+  const html = marked.parse(d, { breaks: true });
+  const paraCount = (html.match(/<p[\s>]/g) || []).length;
+  const isBlock = /<h[1-6][\s>]/.test(html) || /<ul[\s>]/.test(html) || /<ol[\s>]/.test(html) || paraCount > 1;
+  if (isBlock) return { block: true, html: `<div class="md">${html}</div>` };
+  return { block: false, html: `<li>${marked.parseInline(d, { breaks: true })}</li>` };
+}
+
 function card(msg) {
   const el = document.createElement("section");
   el.className = `card ${msg.kind} ${msg.status}`;
@@ -115,13 +148,6 @@ function card(msg) {
     .map((opt) => `<button class="opt" data-opt="${encodeURIComponent(opt)}">${esc(opt)}</button>`)
     .join("");
 
-  const renderDetail = (d) => {
-    const html = marked.parse(d, { breaks: true });
-    const paraCount = (html.match(/<p[\s>]/g) || []).length;
-    const isBlock = /<h[1-6][\s>]/.test(html) || /<ul[\s>]/.test(html) || /<ol[\s>]/.test(html) || paraCount > 1;
-    if (isBlock) return { block: true, html: `<div class="md">${html}</div>` };
-    return { block: false, html: `<li>${marked.parseInline(d, { breaks: true })}</li>` };
-  };
   const renderedDetails = (msg.details || []).map(renderDetail);
   const detailItems = renderedDetails.filter((r) => !r.block).map((r) => r.html).join("");
   const detailBlocks = renderedDetails.filter((r) => r.block).map((r) => r.html).join("");
@@ -622,11 +648,12 @@ async function sendReply(id, body) {
 }
 
 // A message you sent from the compose box — not something the AI authored, so it
-// gets its own small card instead of the review/question layout. Renders compact
-// by default (one-line title + status subline); click anywhere on the row (except
-// a link/button/thumb) expands it in place. Expansion is tracked here rather than
-// in msg data so a refresh tick (which reconciles by unchanged sig, leaving the
-// DOM node untouched) never collapses a card the user has open.
+// gets its own small card instead of the review/question layout. Used only by the
+// History section now (the live board uses compactCard()/the overlay instead);
+// renders compact by default (one-line title + status subline); click anywhere on
+// the row (except a link/button/thumb) expands it in place. Expansion is tracked
+// here rather than in msg data so a refresh tick (which reconciles by unchanged
+// sig, leaving the DOM node untouched) never collapses a card the user has open.
 const expandedSent = new Set();
 
 function sentCard(msg, delivered) {
@@ -651,7 +678,7 @@ function sentCard(msg, delivered) {
 
   const submitComment = () => submitThreadComment(el, ".comment-text", commentKey, msg.title, msg.id);
 
-  const approveIssue = async () => {
+  const approveIssueInPlace = async () => {
     await fetchJSON("/api/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -759,7 +786,7 @@ function sentCard(msg, delivered) {
       return;
     }
     if (e.target.closest(".approve-issue-btn")) {
-      approveIssue();
+      approveIssueInPlace();
       return;
     }
     // Toggle only from the title row — clicking in the body (to select/copy
@@ -791,10 +818,610 @@ function sentCard(msg, delivered) {
   return el;
 }
 
+// ============================================================================
+// Kanban board: 6 state columns + backlog/closed collapse rails + the expanded
+// overlay. The History section above still uses card()/sentCard() unchanged.
+// ============================================================================
+
+const COLUMN_STATES = ["backlog", "in_progress", "questions", "approbation", "landing", "closed"];
+const STATE_LABEL = {
+  backlog: "backlog",
+  in_progress: "in progress",
+  questions: "questions",
+  approbation: "approbation",
+  landing: "landing",
+  closed: "closed",
+};
+
+// The dot's color is normally the column's own accent, except Backlog (where it
+// tells feedback from a project task apart) and Closed (no dot at all, per mock).
+function dotColor(msg) {
+  if (msg.state === "closed") return null;
+  if (msg.state === "backlog") return msg.taskKind === "feedback" ? "#6cbf6c" : "#8a8a90";
+  return { in_progress: "#4a90d9", questions: "#d9a441", approbation: "#6cbf6c", landing: "#b08fd9" }[msg.state] || "#8a8a90";
+}
+
+// The compact card's second line: the last thread entry if there is one (same
+// kind/color convention as sentCard's subline above), else — for a not-yet-
+// threaded r-card — its own context/question text, else a delivery-state hint
+// for a not-yet-threaded human card.
+function compactSubline(msg) {
+  const thread = msg.thread || [];
+  const last = thread[thread.length - 1];
+  if (last) {
+    const snippet = compactSnippet(last.text);
+    if (last.from === "human") return { cls: "sub-human", text: `↳ Toi : ${snippet}` };
+    if (last.kind === "question") return { cls: "sub-question", text: `❓ ${snippet}` };
+    if (last.kind === "done") return { cls: "sub-done", text: `✅ ${snippet}` };
+    return { cls: "", text: `↳ IA : ${snippet}` };
+  }
+  if (msg.direction === "agent" && msg.context) {
+    const snippet = compactSnippet(msg.context);
+    if (msg.kind === "question") return { cls: "sub-question", text: `❓ ${snippet}` };
+    if (msg.kind === "review") return { cls: "sub-done", text: snippet };
+    return { cls: "", text: snippet };
+  }
+  if (msg.direction === "human") {
+    if (msg.acknowledgedAt) return { cls: "", text: "✓ Lu par l'IA · en attente d'une réponse" };
+    if (msg.lastDeliveredAt) return { cls: "", text: "Livré — attend confirmation" };
+  }
+  return null;
+}
+
+// Standalone (unlike sentCard's own local closure) since it's shared by the
+// compact card and the overlay footer, neither of which has sentCard's
+// expandedSent bookkeeping to also clear.
+async function approveIssue(msg) {
+  await fetchJSON("/api/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: `Re "${msg.title}": Approuvé`, images: [], replyTo: msg.id }),
+  });
+  await fetchJSON(`/api/messages/${msg.id}/thread-note`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: "Approuvé ✅" }),
+  }).catch(() => {});
+  await fetchJSON(`/api/messages/${msg.id}/seen`, { method: "POST" }).catch(() => {});
+  closeOverlayIfOpen(msg.id);
+  refresh(true);
+}
+
+function compactCard(msg) {
+  const el = document.createElement("div");
+  el.className = "ccard";
+  el.dataset.msgId = msg.id;
+
+  const dot = dotColor(msg);
+  const chip = msg.state === "backlog" && msg.taskKind ? `<span class="chip chip-${msg.taskKind}">${esc(msg.taskKind)}</span>` : "";
+  const { tag: sourceTag, rest: titleRest } = splitSourceTag(msg.summary || msg.title);
+  const sourceChip = sourceChipHTML(sourceTag);
+  const title = esc(titleRest);
+  const firstImg = (msg.images || [])[0];
+  const miniThumb = firstImg ? `<img src="${imgSrc(firstImg.path)}" class="thumb mini-thumb" />` : "";
+  const undelivered = msg.direction === "human" && !msg.replyTo && !msg.lastDeliveredAt && !msg.acknowledgedAt;
+  const cancelBtn = undelivered ? `<button class="cancel-sent" title="Annuler">×</button>` : "";
+  const sub = compactSubline(msg);
+
+  let actionsHTML = "";
+  if (msg.state === "questions" && msg.direction === "agent") {
+    const options = (msg.options || [])
+      .map((opt) => `<button class="opt" data-opt="${encodeURIComponent(opt)}">${esc(opt)}</button>`)
+      .join("");
+    actionsHTML = `
+      <div class="ccard-actions">
+        ${msg.kind === "review" ? `<button class="approve-btn">✅ Approve</button>` : ""}
+        ${options}
+        <textarea class="growable-text reply-text" rows="1" placeholder="Répondre…"></textarea>
+        <label class="attach-btn">📎<input type="file" accept="image/*" class="attach-input" hidden /></label>
+        <button class="send-reply">Reply</button>
+      </div>
+      <div class="pending-row" data-pending-key="${msg.id}"></div>`;
+  } else if (msg.state === "questions" && msg.direction === "human") {
+    const commentKey = `comment:${msg.id}`;
+    const approveBtn = isActionableThreadEntry(lastThreadEntry(msg)) ? `<button class="approve-issue-btn">✅ Approuver</button>` : "";
+    actionsHTML = `
+      <div class="ccard-actions">
+        ${approveBtn}
+        <textarea class="growable-text comment-text" rows="1" placeholder="Répondre…"></textarea>
+        <button class="send-comment">Send</button>
+      </div>
+      <div class="pending-row" data-pending-key="${commentKey}"></div>`;
+  } else if (msg.state === "approbation") {
+    actionsHTML = `
+      <div class="ccard-actions">
+        <button class="approve-btn">✅ Approuver</button>
+        <button class="open-overlay-fix">À corriger…</button>
+      </div>`;
+  } else if (msg.state === "closed") {
+    actionsHTML = `<div class="ccard-actions"><button class="archive-link-btn">Testé ✓ Archiver</button></div>`;
+  }
+
+  el.innerHTML = `
+    <div class="ccard-row">
+      ${dot ? `<span class="ccard-dot" style="background:${dot}"></span>` : ""}
+      ${chip}
+      ${sourceChip}
+      <span class="ccard-title">${title}</span>
+      ${miniThumb}
+      ${cancelBtn}
+    </div>
+    ${sub ? `<div class="ccard-sub ${sub.cls}">${sub.text}</div>` : ""}
+    ${actionsHTML}
+  `;
+
+  if (msg.state === "questions" && msg.direction === "agent") {
+    el.querySelectorAll(".opt").forEach((btn) =>
+      btn.addEventListener("click", () => sendReply(msg.id, { optionChosen: decodeURIComponent(btn.dataset.opt) }))
+    );
+    const imgsFor = () => (pendingImages.get(msg.id) || []).map((p) => ({ path: p }));
+    el.querySelector(".approve-btn")?.addEventListener("click", async () => {
+      const ta = el.querySelector(".reply-text");
+      const text = ta.value;
+      ta.value = "";
+      try {
+        await sendReply(msg.id, { decision: "approved", text, images: imgsFor() });
+      } catch {
+        ta.value = text;
+      }
+    });
+    const submitReply = async () => {
+      const ta = el.querySelector(".reply-text");
+      const text = ta.value;
+      const imgs = imgsFor();
+      if (!text.trim() && !imgs.length) return;
+      ta.value = "";
+      try {
+        await sendReply(msg.id, { decision: "iteration", text, images: imgs });
+      } catch {
+        ta.value = text;
+      }
+    };
+    el.querySelector(".send-reply").addEventListener("click", submitReply);
+    el.querySelector(".reply-text").addEventListener("keydown", (e) => {
+      if (submitsOnEnter(e)) {
+        e.preventDefault();
+        submitReply();
+      }
+    });
+    el.querySelector(".attach-input").addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      addPendingImage(msg.id, await uploadFile(file));
+    });
+    wirePasteToAttach(el.querySelector(".reply-text"), msg.id);
+    wireDropToAttach(el, msg.id);
+  } else if (msg.state === "questions" && msg.direction === "human") {
+    const commentKey = `comment:${msg.id}`;
+    const submitComment = () => submitThreadComment(el, ".comment-text", commentKey, msg.title, msg.id);
+    el.querySelector(".send-comment").addEventListener("click", submitComment);
+    el.querySelector(".comment-text").addEventListener("keydown", (e) => {
+      if (submitsOnEnter(e)) {
+        e.preventDefault();
+        submitComment();
+      }
+    });
+    el.querySelector(".approve-issue-btn")?.addEventListener("click", () => approveIssue(msg));
+    wirePasteToAttach(el.querySelector(".comment-text"), commentKey);
+    wireDropToAttach(el, commentKey);
+  } else if (msg.state === "approbation") {
+    el.querySelector(".approve-btn").addEventListener("click", () => {
+      if (msg.direction === "agent") sendReply(msg.id, { decision: "approved", text: "", images: [] });
+      else approveIssue(msg);
+    });
+    el.querySelector(".open-overlay-fix").addEventListener("click", (e) => {
+      e.stopPropagation();
+      openOverlay(msg, el, { focusReply: true });
+    });
+  } else if (msg.state === "closed") {
+    el.querySelector(".archive-link-btn").addEventListener("click", () => {
+      fetchJSON(`/api/messages/${msg.id}/archive`, { method: "POST" }).then(() => refresh(true));
+    });
+  }
+
+  el.querySelectorAll(".growable-text").forEach((ta) => ta.addEventListener("input", () => autoGrow(ta)));
+  el.querySelectorAll(".pending-row").forEach((row) => renderPendingChips(row, row.dataset.pendingKey));
+
+  // Delegated: click-to-open overlay, mini-thumb, cancel — wired regardless of
+  // state. Buttons/textareas/inputs already handled their own click above; this
+  // only ever fires the overlay open when the click lands on plain card surface
+  // (the title row), matching the guard used elsewhere for expand-in-place.
+  el.addEventListener("click", (e) => {
+    const thumb = e.target.closest(".thumb");
+    if (thumb) {
+      openLightbox(
+        thumb.src,
+        msg.direction === "agent" ? msg.id : `comment:${msg.id}`,
+        msg.direction === "agent" ? msg.status !== "answered" : true
+      );
+      return;
+    }
+    if (e.target.closest(".cancel-sent")) {
+      fetch(`/api/messages/${msg.id}`, { method: "DELETE" }).then(() => refresh(true));
+      return;
+    }
+    if (e.target.closest("button, textarea, input, label, a")) return;
+    if (String(window.getSelection && window.getSelection())) return;
+    openOverlay(msg, el);
+  });
+
+  return el;
+}
+
+function compactSig(m) {
+  const thread = m.thread || [];
+  return JSON.stringify([
+    m.state,
+    m.status,
+    m.kind,
+    m.direction,
+    m.summary,
+    m.title,
+    m.taskKind,
+    (m.images || [])[0] && m.images[0].path,
+    m.options,
+    m.context,
+    m.reply && m.reply.decision,
+    m.reply && m.reply.at,
+    thread.length,
+    thread[thread.length - 1],
+    Boolean(m.lastDeliveredAt),
+    Boolean(m.acknowledgedAt),
+    Boolean(m.deliveredAt),
+  ]);
+}
+
+// ---------------------------------------------------------------------------
+// Backlog/Closed collapse rails — click a rail to expand, click the column's
+// own collapse arrow to fold it back. Persisted so a reload keeps the choice;
+// default (nothing stored yet) is collapsed, per spec.
+// ---------------------------------------------------------------------------
+
+function isCollapsed(state) {
+  try {
+    const v = localStorage.getItem(`rb-collapsed-${state}`);
+    return v === null ? true : v === "true";
+  } catch {
+    return true;
+  }
+}
+function setCollapsed(state, collapsed) {
+  document.getElementById(`rail-${state}`).hidden = !collapsed;
+  document.getElementById(`col-${state}`).hidden = collapsed;
+  try {
+    localStorage.setItem(`rb-collapsed-${state}`, String(collapsed));
+  } catch {}
+}
+["backlog", "closed"].forEach((state) => {
+  setCollapsed(state, isCollapsed(state));
+  document.getElementById(`rail-${state}`).addEventListener("click", () => setCollapsed(state, false));
+  // The whole column header folds it — a lone tiny arrow is too small a target.
+  const header = document.getElementById(`col-${state}`).querySelector(".column-header");
+  header.style.cursor = "pointer";
+  header.addEventListener("click", () => setCollapsed(state, true));
+});
+
+// ---------------------------------------------------------------------------
+// Expanded overlay: full card content + sticky footer, animated open from the
+// clicked card's rect (FLIP-style), closes on Esc/backdrop, and stays open
+// across a refresh — re-rendering in place only when the underlying message
+// actually changed (same sig contract as the column cards).
+// ---------------------------------------------------------------------------
+
+let openCardId = null;
+
+function overlayHeader(msg) {
+  const dot = dotColor(msg) || "#77777d";
+  const kindBadge = msg.direction === "agent" ? `<span class="kind-badge">${esc(msg.kind)}</span>` : "";
+  const { tag: sourceTag, rest: titleRest } = splitSourceTag(msg.title);
+  return `
+    <div class="overlay-head">
+      <span class="ccard-dot" style="background:${dot}"></span>
+      ${sourceChipHTML(sourceTag)}
+      <strong class="overlay-title">${esc(titleRest)}</strong>
+      ${kindBadge}
+      <span class="overlay-badge">${esc(STATE_LABEL[msg.state] || msg.state)}</span>
+      ${msg.direction === "human" ? `<span class="archive-link" id="overlayArchive">Archiver</span>` : ""}
+      <button class="overlay-close" id="overlayClose">✕</button>
+    </div>`;
+}
+
+// A card in "questions" or "approbation" is awaiting a FRESH decision right
+// now, even if `status` is still "answered" from an earlier round (move_task
+// can send an already-answered r-card back for another look) — the reply row
+// (with Approve/options) belongs in the footer then, never the plain followup
+// box, which is only for a card that's actually done. Shared by the body
+// (which HTML to render) and the footer wiring (which selectors exist).
+function agentAwaitingDecision(msg) {
+  return msg.state === "questions" || msg.state === "approbation";
+}
+
+function overlayAgentBody(msg) {
+  const images = (msg.images || [])
+    .map((img) => `<img src="${imgSrc(img.path)}" class="thumb" data-msg-id="${msg.id}" />`)
+    .join("");
+  const videos = (msg.videos || []).map((v) => `<video src="${imgSrc(v.path)}" controls preload="metadata"></video>`).join("");
+  const options = (msg.options || [])
+    .map((opt) => `<button class="opt" data-opt="${encodeURIComponent(opt)}">${esc(opt)}</button>`)
+    .join("");
+  const renderedDetails = (msg.details || []).map(renderDetail);
+  const detailItems = renderedDetails.filter((r) => !r.block).map((r) => r.html).join("");
+  const detailBlocks = renderedDetails.filter((r) => r.block).map((r) => r.html).join("");
+  const followupKey = `followup:${msg.id}`;
+  const awaitingDecision = agentAwaitingDecision(msg);
+
+  const bodyHTML = `
+    ${msg.context ? `<div class="context md">${marked.parse(msg.context, { breaks: true })}</div>` : ""}
+    ${detailItems ? `<ul>${detailItems}</ul>` : ""}
+    ${detailBlocks}
+    ${images ? `<div class="images">${images}</div>` : ""}
+    ${videos ? `<div class="videos">${videos}</div>` : ""}
+  `;
+
+  const footerHTML =
+    msg.status === "answered" && !awaitingDecision
+      ? `<div class="answered">${msg.reply.decision ? `[${esc(msg.reply.decision)}] ` : ""}${esc(msg.reply.optionChosen || msg.reply.text || "(no comment)")}</div>
+        <div class="reply-row overlay-footer-row">
+          <textarea class="growable-text followup-text" rows="1" placeholder="Add a follow-up comment… (Shift+Enter for a new line, paste an image to attach)"></textarea>
+          <button class="send-followup">Send</button>
+        </div>
+        <div class="pending-row" data-pending-key="${followupKey}"></div>`
+      : `<div class="reply-row overlay-footer-row">
+          ${msg.kind === "review" ? `<button class="approve-btn">✅ Approuver</button>` : ""}
+          ${options}
+          <textarea class="growable-text reply-text" rows="1" placeholder="Commenter… (Ctrl+V ou glisse une image)"></textarea>
+          <label class="attach-btn">📎<input type="file" accept="image/*" class="attach-input" hidden /></label>
+          <button class="send-reply">Reply</button>
+        </div>
+        <div class="pending-row" data-pending-key="${msg.id}"></div>`;
+
+  return { bodyHTML, footerHTML };
+}
+
+function overlayHumanBody(msg) {
+  const images = (msg.images || []).map((img) => `<img src="${imgSrc(img.path)}" class="thumb" />`).join("");
+  const thread = (msg.thread || [])
+    .map((t) => `<div class="thread-entry from-${t.from}">${marked.parse(t.text, { breaks: true })}</div>`)
+    .join("");
+  const commentKey = `comment:${msg.id}`;
+  const approveBtn = isActionableThreadEntry(lastThreadEntry(msg)) ? `<button class="approve-issue-btn">✅ Approuver</button>` : "";
+
+  const bodyHTML = `
+    ${images ? `<div class="images">${images}</div>` : ""}
+    ${thread ? `<div class="thread">${thread}</div>` : ""}
+  `;
+
+  const footerHTML = `
+    <div class="reply-row overlay-footer-row">
+      ${approveBtn}
+      <textarea class="growable-text comment-text" rows="1" placeholder="Commenter… (Ctrl+V ou glisse une image)"></textarea>
+      <button class="send-comment">Send</button>
+    </div>
+    <div class="pending-row" data-pending-key="${commentKey}"></div>
+  `;
+
+  return { bodyHTML, footerHTML };
+}
+
+function overlaySig(m) {
+  return m.direction === "agent"
+    ? JSON.stringify([
+        m.id,
+        m.status,
+        m.reply,
+        Boolean(m.lastDeliveredAt),
+        (m.images || []).map((i) => i.path),
+        (m.videos || []).map((v) => v.path),
+        m.options,
+        m.details,
+        m.context,
+        m.title,
+        m.state,
+      ])
+    : JSON.stringify([
+        m.id,
+        (m.thread || []).length,
+        m.thread,
+        (m.images || []).map((i) => i.path),
+        m.title,
+        m.state,
+        m.acknowledgedAt,
+        Boolean(m.lastDeliveredAt),
+      ]);
+}
+
+function wireOverlayMedia(panel, msg) {
+  panel.querySelectorAll(".thumb").forEach((img) =>
+    img.addEventListener("click", () =>
+      openLightbox(
+        img.src,
+        msg.direction === "agent" ? msg.id : `comment:${msg.id}`,
+        msg.direction === "agent" ? msg.status !== "answered" : true
+      )
+    )
+  );
+  panel.querySelectorAll(".thread img").forEach((img) => {
+    const src = img.getAttribute("src") || "";
+    if (!/^(https?:|data:|\/api\/image)/i.test(src)) img.src = imgSrc(src);
+    img.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openLightbox(img.src, `comment:${msg.id}`, true);
+    });
+  });
+  panel.querySelectorAll(".thread video").forEach((v) => {
+    const src = v.getAttribute("src") || "";
+    if (src && !/^(https?:|data:|\/api\/image)/i.test(src)) v.src = imgSrc(src);
+    v.setAttribute("controls", "");
+  });
+}
+
+function wireOverlayFooter(panel, msg) {
+  if (msg.direction === "agent") {
+    if (msg.status === "answered" && !agentAwaitingDecision(msg)) {
+      const followupKey = `followup:${msg.id}`;
+      const submitFollowup = () => submitThreadComment(panel, ".followup-text", followupKey, msg.title);
+      panel.querySelector(".send-followup").addEventListener("click", submitFollowup);
+      panel.querySelector(".followup-text").addEventListener("keydown", (e) => {
+        if (submitsOnEnter(e)) {
+          e.preventDefault();
+          submitFollowup();
+        }
+      });
+      wirePasteToAttach(panel.querySelector(".followup-text"), followupKey);
+      wireDropToAttach(panel, followupKey);
+    } else {
+      panel.querySelectorAll(".opt").forEach((btn) =>
+        btn.addEventListener("click", () => sendReply(msg.id, { optionChosen: decodeURIComponent(btn.dataset.opt) }))
+      );
+      const imgsFor = () => (pendingImages.get(msg.id) || []).map((p) => ({ path: p }));
+      panel.querySelector(".approve-btn")?.addEventListener("click", async () => {
+        const ta = panel.querySelector(".reply-text");
+        const text = ta.value;
+        ta.value = "";
+        try {
+          await sendReply(msg.id, { decision: "approved", text, images: imgsFor() });
+          closeOverlayIfOpen(msg.id);
+        } catch {
+          ta.value = text;
+        }
+      });
+      const submitReply = async () => {
+        const ta = panel.querySelector(".reply-text");
+        const text = ta.value;
+        const imgs = imgsFor();
+        if (!text.trim() && !imgs.length) return;
+        ta.value = "";
+        try {
+          await sendReply(msg.id, { decision: "iteration", text, images: imgs });
+          closeOverlayIfOpen(msg.id);
+        } catch {
+          ta.value = text;
+        }
+      };
+      panel.querySelector(".send-reply").addEventListener("click", submitReply);
+      panel.querySelector(".reply-text").addEventListener("keydown", (e) => {
+        if (submitsOnEnter(e)) {
+          e.preventDefault();
+          submitReply();
+        }
+      });
+      panel.querySelector(".attach-input").addEventListener("change", async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        addPendingImage(msg.id, await uploadFile(file));
+      });
+      wirePasteToAttach(panel.querySelector(".reply-text"), msg.id);
+      wireDropToAttach(panel, msg.id);
+    }
+  } else {
+    const commentKey = `comment:${msg.id}`;
+    const submitComment = () =>
+      submitThreadComment(panel, ".comment-text", commentKey, msg.title, msg.id).then(() => closeOverlayIfOpen(msg.id));
+    panel.querySelector(".send-comment").addEventListener("click", submitComment);
+    panel.querySelector(".comment-text").addEventListener("keydown", (e) => {
+      if (submitsOnEnter(e)) {
+        e.preventDefault();
+        submitComment();
+      }
+    });
+    panel.querySelector(".approve-issue-btn")?.addEventListener("click", () => approveIssue(msg));
+    wirePasteToAttach(panel.querySelector(".comment-text"), commentKey);
+    wireDropToAttach(panel, commentKey);
+  }
+  panel.querySelectorAll(".pending-row").forEach((row) => renderPendingChips(row, row.dataset.pendingKey));
+  panel.querySelectorAll(".growable-text").forEach((ta) => ta.addEventListener("input", () => autoGrow(ta)));
+}
+
+// Re-renders the overlay's content from `msg` in place — preserving scroll and
+// any unsent draft — and re-wires it. Called both on open and, from refresh(),
+// whenever a live update changes the open card's sig.
+function renderOverlayBody(msg) {
+  const panel = document.getElementById("overlayPanel");
+  const prevScroll = panel.querySelector(".overlay-scroll");
+  const scrollBefore = prevScroll ? prevScroll.scrollTop : 0;
+  const prevTa = panel.querySelector("textarea");
+  const draft = prevTa ? prevTa.value : "";
+
+  const { bodyHTML, footerHTML } = msg.direction === "agent" ? overlayAgentBody(msg) : overlayHumanBody(msg);
+  panel.innerHTML = `${overlayHeader(msg)}<div class="overlay-scroll">${bodyHTML}</div><div class="overlay-footer">${footerHTML}</div>`;
+  panel.dataset.sig = overlaySig(msg);
+  panel.dataset.msgId = String(msg.id);
+
+  const scrollEl = panel.querySelector(".overlay-scroll");
+  if (scrollEl) scrollEl.scrollTop = scrollBefore;
+  const ta = panel.querySelector("textarea");
+  if (ta && draft) {
+    ta.value = draft;
+    autoGrow(ta);
+  }
+
+  panel.querySelector("#overlayClose").addEventListener("click", closeOverlay);
+  panel.querySelector("#overlayArchive")?.addEventListener("click", () => {
+    fetchJSON(`/api/messages/${msg.id}/archive`, { method: "POST" }).then(() => {
+      closeOverlay();
+      refresh(true);
+    });
+  });
+  wireOverlayFooter(panel, msg);
+  wireOverlayMedia(panel, msg);
+}
+
+function onOverlayKeydown(e) {
+  if (e.key === "Escape") closeOverlay();
+}
+
+function openOverlay(msg, cardEl, opts = {}) {
+  openCardId = String(msg.id);
+  const backdrop = document.getElementById("overlayBackdrop");
+  const panel = document.getElementById("overlayPanel");
+  backdrop.hidden = false;
+  renderOverlayBody(msg);
+
+  // FLIP: jump the (now naturally centered) panel back to the clicked card's
+  // rect via transform, then transition to identity on the next frame.
+  const cardRect = cardEl.getBoundingClientRect();
+  panel.style.transition = "none";
+  panel.style.transform = "none";
+  panel.style.opacity = "1";
+  requestAnimationFrame(() => {
+    const panelRect = panel.getBoundingClientRect();
+    const scaleX = cardRect.width / panelRect.width;
+    const scaleY = cardRect.height / panelRect.height;
+    const dx = cardRect.left - panelRect.left;
+    const dy = cardRect.top - panelRect.top;
+    panel.style.transform = `translate(${dx}px, ${dy}px) scale(${scaleX}, ${scaleY})`;
+    panel.style.opacity = "0.3";
+    requestAnimationFrame(() => {
+      panel.style.transition = "transform 0.2s ease, opacity 0.2s ease";
+      panel.style.transform = "translate(0, 0) scale(1, 1)";
+      panel.style.opacity = "1";
+    });
+  });
+
+  if (opts.focusReply) {
+    setTimeout(() => panel.querySelector(".reply-text, .comment-text")?.focus(), 210);
+  }
+  document.addEventListener("keydown", onOverlayKeydown);
+}
+
+function closeOverlay() {
+  openCardId = null;
+  document.getElementById("overlayBackdrop").hidden = true;
+  document.removeEventListener("keydown", onOverlayKeydown);
+}
+
+function closeOverlayIfOpen(id) {
+  if (openCardId === String(id)) closeOverlay();
+}
+
+document.getElementById("overlayBackdrop").addEventListener("click", (e) => {
+  if (e.target.id === "overlayBackdrop") closeOverlay();
+});
+
 // Answered/delivered items (still-queued or already drained into /api/history) are
-// shown only when the toggle is on, and always after the open/pending ones.
-// Persisted so a reload — including the auto-reload-on-new-build below — doesn't
-// silently drop back to "History off" out from under you.
+// shown only when the toggle is on, and always after the live board. Persisted so
+// a reload — including the auto-reload-on-new-build below — doesn't silently drop
+// back to "History off" out from under you.
 let showAnswered = false;
 try {
   showAnswered = localStorage.getItem("showAnswered") === "true";
@@ -851,9 +1478,9 @@ function sentSig(m, delivered) {
 // `force: true` is for explicit user actions (sending a reply, toggling History) —
 // those must always re-render, even though the just-submitted textarea still holds
 // its text at that instant. Passive callers (SSE, poll, visibility) stay guarded.
-// Reconciles one section's container against its desired card list, keyed by
-// msg id + sig (unchanged sig = DOM node untouched, same contract as before —
-// just scoped to a single container instead of the whole board).
+// Reconciles one container against its desired card list, keyed by msg id + sig
+// (unchanged sig = DOM node untouched) — shared by the 6 board columns and the
+// History section alike.
 function reconcileSection(containerEl, desired, drafts) {
   const existing = new Map();
   [...containerEl.children].forEach((el) => existing.set(el.dataset.msgId, el));
@@ -879,16 +1506,12 @@ function reconcileSection(containerEl, desired, drafts) {
   for (const stale of existing.values()) stale.remove();
 
   for (const [id, value] of Object.entries(drafts)) {
-    const t = containerEl.querySelector(`.card[data-msg-id="${id}"] textarea`);
+    const t = containerEl.querySelector(`[data-msg-id="${id}"] textarea`);
     if (t && t.value === "") {
       t.value = value;
       autoGrow(t);
     }
   }
-}
-
-function setCount(el, n) {
-  el.textContent = n > 0 ? String(n) : "";
 }
 
 // Bumped on every refresh() entry; a refresh that finds itself no longer the
@@ -919,23 +1542,23 @@ async function refresh(force) {
     if (!liveAndHistoryIds.has(id)) expandedSent.delete(id);
   }
 
-  const agentOpen = live.filter((m) => m.direction === "agent" && m.status === "open").reverse();
-  // replyTo messages are delivery vehicles of thread replies — never rendered
-  // as their own card (the thread on the original card shows the content).
-  const humanOpen = live.filter((m) => m.direction === "human" && m.status === "open" && !m.replyTo).reverse();
+  // Every live card that belongs on the board carries a kanban `state` (a
+  // replyTo human message is a thread-reply delivery vehicle and has none).
+  const byState = {};
+  for (const s of COLUMN_STATES) byState[s] = [];
+  for (const m of live) if (byState[m.state]) byState[m.state].push(m);
+  for (const s of COLUMN_STATES) byState[s].reverse(); // newest first
+  // Feedback always outranks a project task within Backlog (stable sort keeps
+  // the newest-first order within each group).
+  byState.backlog.sort((a, b) => (a.taskKind === "feedback" ? 0 : 1) - (b.taskKind === "feedback" ? 0 : 1));
 
-  const issueCard = (m) => ({ id: String(m.id), sig: sentSig(m, false), build: () => sentCard(m, false) });
-
-  const openDesired = [
-    ...humanOpen.filter(needsHuman).map(issueCard),
-    ...agentOpen.map((m) => ({ id: String(m.id), sig: cardSig(m), build: () => card(m) })),
-  ];
-  const issuesDesired = humanOpen.filter((m) => !needsHuman(m)).map(issueCard);
-
+  // Archived stuff only (store.history()) — a still-live card, however settled-
+  // looking (status "answered" sitting in an unfinished state, e.g. re-asked via
+  // move_task after an earlier reply), already has its column on the live board
+  // above and would otherwise show up twice.
   let historyDesired = [];
   if (showAnswered) {
     const answered = [
-      ...live.filter((m) => m.direction === "agent" && m.status === "answered"),
       ...history.filter((m) => m.direction === "agent"),
       ...history.filter((m) => m.direction === "human" && !m.replyTo),
     ];
@@ -950,11 +1573,11 @@ async function refresh(force) {
 
   // Carry unsent drafts across a rebuild (only rebuilt cards lose their textarea —
   // an untouched card keeps its draft simply by not being touched): harvest by
-  // card msg id, restore after reconciling. Harvested once across all sections
-  // since a card can move between sections (status change) between refreshes.
+  // card msg id, restore after reconciling.
   const drafts = {};
-  document.querySelectorAll(".section-cards .card[data-msg-id] textarea").forEach((t) => {
-    if (t.value !== "") drafts[t.closest(".card").dataset.msgId] = t.value;
+  document.querySelectorAll("#board [data-msg-id] textarea, #cardsHistory [data-msg-id] textarea").forEach((t) => {
+    const holder = t.closest("[data-msg-id]");
+    if (t.value !== "") drafts[holder.dataset.msgId] = t.value;
   });
 
   // A card rebuilt/inserted/removed above the viewport shifts every card below
@@ -964,18 +1587,36 @@ async function refresh(force) {
   const scrollY = window.scrollY;
   const focusBefore = document.activeElement;
 
-  reconcileSection(document.getElementById("cardsOpen"), openDesired, drafts);
-  reconcileSection(document.getElementById("cardsIssues"), issuesDesired, drafts);
+  for (const s of COLUMN_STATES) {
+    const container = document.getElementById(`cards-${s}`);
+    const desired = byState[s].map((m) => ({ id: String(m.id), sig: compactSig(m), build: () => compactCard(m) }));
+    reconcileSection(container, desired, drafts);
+    container.classList.toggle("empty", desired.length === 0);
+    document.getElementById(`col-${s}`).classList.toggle("empty-col", desired.length === 0);
+    const countText = desired.length > 0 ? String(desired.length) : "";
+    document.getElementById(`count-${s}`).textContent = countText;
+    const railCount = document.getElementById(`railcount-${s}`);
+    if (railCount) railCount.textContent = countText;
+  }
+
   reconcileSection(document.getElementById("cardsHistory"), historyDesired, drafts);
 
   if (document.activeElement === focusBefore) window.scrollTo(0, scrollY);
 
-  document.getElementById("blockOpen").classList.toggle("hidden", openDesired.length === 0);
-  document.getElementById("blockIssues").classList.toggle("hidden", issuesDesired.length === 0);
   document.getElementById("blockHistory").classList.toggle("hidden", showAnswered && historyDesired.length === 0);
-  setCount(document.getElementById("countOpen"), openDesired.length);
-  setCount(document.getElementById("countIssues"), issuesDesired.length);
   document.getElementById("historyHint").hidden = showAnswered;
+
+  // Keep an open overlay in sync with the live message it's showing — re-render
+  // only on an actual content change (sig), same contract as the column cards.
+  if (openCardId) {
+    const openMsg = live.find((m) => String(m.id) === openCardId) || history.find((m) => String(m.id) === openCardId);
+    if (!openMsg) {
+      closeOverlay();
+    } else {
+      const panel = document.getElementById("overlayPanel");
+      if (panel.dataset.sig !== overlaySig(openMsg)) renderOverlayBody(openMsg);
+    }
+  }
 }
 
 function toggleHistory() {

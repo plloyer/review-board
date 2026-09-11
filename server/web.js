@@ -6,6 +6,7 @@ const { StreamableHTTPServerTransport } = require("@modelcontextprotocol/sdk/ser
 const { buildServer } = require("./mcp");
 const store = require("./store");
 const push = require("./push");
+const { summarizeTitle } = require("./summarize");
 
 const BUILD_ID = String(Date.now());
 
@@ -116,7 +117,21 @@ function createApp({ clipboard } = {}) {
     const images = (req.body && req.body.images) || [];
     const replyTo = (req.body && req.body.replyTo) || null;
     if (!text.trim() && images.length === 0) return res.status(400).json({ error: "text or images required" });
-    res.json(store.addHumanMessage(text, images, replyTo));
+    const msg = store.addHumanMessage(text, images, replyTo);
+    // Title summary is only for human-composed cards, not thread-reply delivery
+    // vehicles — fire-and-forget, never blocks the response.
+    if (!replyTo) summarizeTitle(msg.id, msg.title, store).catch(() => {});
+    res.json(msg);
+  });
+
+  web.post("/api/messages/:id/move", (req, res) => {
+    const { state, note } = req.body || {};
+    if (!store.TASK_STATES.includes(state)) return res.status(400).json({ error: "invalid state" });
+    try {
+      res.json(store.moveTask(req.params.id, state, note));
+    } catch (err) {
+      res.status(404).json({ error: String(err.message || err) });
+    }
   });
 
   web.delete("/api/messages/:id", (req, res) => {

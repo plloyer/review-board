@@ -11,6 +11,7 @@ const path = require("path");
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "review-board-api-test-"));
 process.env.REVIEW_BOARD_DATA_DIR = dir;
+process.env.REVIEW_BOARD_NO_SUMMARY = "1"; // never spawn the summarizer CLI in tests
 
 const { createApp } = require("../server/web");
 const store = require("../server/store");

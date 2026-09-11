@@ -15,7 +15,7 @@
     <header>
       <h1>Review Board</h1>
       <form id="compose">
-        <textarea id="composeText" rows="1" placeholder="Send a message to the AI session… (Shift+Enter for a new line, paste an image to attach)"></textarea>
+        <textarea id="composeText" rows="1" placeholder="Ajouter du feedback ou une tâche… (va dans Backlog, l'IA traite ton feedback en premier)"></textarea>
         <button type="submit">Send</button>
       </form>
       <button id="notifyToggle">🔔 <span class="btn-label">Notifications</span></button>
@@ -23,32 +23,82 @@
     </header>
     <div id="composeChips"></div>
     <div id="notifyStatus" hidden></div>
-    <main>
-      <section class="section-block" id="blockOpen">
-        <div class="section-header" style="--accent:#d9a441">
-          <span class="section-title">À toi de répondre</span>
-          <span class="section-count" id="countOpen"></span>
-          <span class="section-rule"></span>
+
+    <main id="board">
+      <div class="col-rail" id="rail-backlog" data-state="backlog">
+        <span class="rail-count" id="railcount-backlog"></span>
+        <span class="rail-label">Backlog ›</span>
+      </div>
+      <section class="column" id="col-backlog" data-state="backlog" hidden>
+        <div class="column-header">
+          <span class="column-collapse" title="Collapse">‹</span>
+          <span class="column-title">Backlog</span>
+          <span class="column-count" id="count-backlog"></span>
         </div>
-        <div class="section-cards" id="cardsOpen"></div>
+        <div class="column-cards" id="cards-backlog"></div>
       </section>
-      <section class="section-block" id="blockIssues">
-        <div class="section-header issue" style="--accent:#6cbf6c">
-          <span class="section-title">Tes issues — l'IA travaille dessus</span>
-          <span class="section-count issue-count" id="countIssues"></span>
-          <span class="section-rule"></span>
+
+      <section class="column" id="col-in_progress" data-state="in_progress">
+        <div class="column-header">
+          <span class="column-title">In Progress</span>
+          <span class="column-count" id="count-in_progress"></span>
         </div>
-        <div class="section-cards" id="cardsIssues"></div>
+        <div class="column-cards" id="cards-in_progress"></div>
       </section>
-      <section class="section-block" id="blockHistory">
-        <div class="section-header muted">
-          <span class="section-title">Réglé récemment</span>
-          <span class="section-rule"></span>
-          <span class="history-hint" id="historyHint">Voir l'historique →</span>
+
+      <section class="column" id="col-questions" data-state="questions">
+        <div class="column-header">
+          <span class="column-title">Questions</span>
+          <span class="column-count" id="count-questions"></span>
+          <span class="column-hint">besoin de toi</span>
         </div>
-        <div class="section-cards" id="cardsHistory"></div>
+        <div class="column-cards" id="cards-questions"></div>
       </section>
+
+      <section class="column" id="col-approbation" data-state="approbation">
+        <div class="column-header">
+          <span class="column-title">Approbation</span>
+          <span class="column-count" id="count-approbation"></span>
+        </div>
+        <div class="column-cards" id="cards-approbation"></div>
+      </section>
+
+      <section class="column" id="col-landing" data-state="landing">
+        <div class="column-header">
+          <span class="column-title">Landing</span>
+          <span class="column-count" id="count-landing"></span>
+        </div>
+        <div class="column-cards" id="cards-landing"></div>
+      </section>
+
+      <section class="column" id="col-closed" data-state="closed" hidden>
+        <div class="column-header">
+          <span class="column-title">Closed</span>
+          <span class="column-count" id="count-closed"></span>
+          <span class="column-hint">à retester</span>
+          <span class="column-collapse column-collapse-right" title="Collapse">›</span>
+        </div>
+        <div class="column-cards" id="cards-closed"></div>
+      </section>
+      <div class="col-rail" id="rail-closed" data-state="closed">
+        <span class="rail-count" id="railcount-closed"></span>
+        <span class="rail-label">‹ Closed — à retester</span>
+      </div>
     </main>
+
+    <section class="section-block" id="blockHistory">
+      <div class="section-header muted">
+        <span class="section-title">Réglé récemment</span>
+        <span class="section-rule"></span>
+        <span class="history-hint" id="historyHint">Voir l'historique →</span>
+      </div>
+      <div class="section-cards" id="cardsHistory"></div>
+    </section>
+
+    <div class="overlay-backdrop" id="overlayBackdrop" hidden>
+      <div class="overlay-panel" id="overlayPanel"></div>
+    </div>
+
     <script src="marked.min.js"></script>
     <script src="app.js"></script>
   </body>

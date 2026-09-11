@@ -285,3 +285,97 @@ test("loading a state file without a history key does not crash (back-compat)", 
   const store = require("../server/store");
   assert.deepEqual(store.history(), []);
 });
+
+// --- kanban state ---------------------------------------------------------
+
+test("addHumanMessage assigns state backlog + taskKind feedback, but a replyTo vehicle gets neither", () => {
+  const { store } = freshStore();
+  const filed = store.addHumanMessage("bug report", []);
+  assert.equal(filed.state, "backlog");
+  assert.equal(filed.taskKind, "feedback");
+
+  const vehicle = store.addHumanMessage("approved", [], "r1");
+  assert.equal(vehicle.state, undefined);
+  assert.equal(vehicle.taskKind, undefined);
+});
+
+test("createTask files an agent-originated project task as a human-shaped card", () => {
+  const { store } = freshStore();
+  const task = store.createTask({ title: "Refactor the thing", project: "review-board" });
+  assert.ok(task.id.startsWith("u"));
+  assert.equal(task.direction, "human");
+  assert.equal(task.createdBy, "agent");
+  assert.equal(task.taskKind, "projet");
+  assert.equal(task.state, "backlog");
+  assert.deepEqual(task.thread, []);
+});
+
+test("addAgentMessage maps kind to an initial state: question -> questions, note -> in_progress, review -> approbation", () => {
+  const { store } = freshStore();
+  assert.equal(store.addAgentMessage({ title: "q", kind: "question" }).state, "questions");
+  assert.equal(store.addAgentMessage({ title: "n", kind: "note" }).state, "in_progress");
+  assert.equal(store.addAgentMessage({ title: "r", kind: "review" }).state, "approbation");
+});
+
+test("reply() moves the card per decision: approved -> landing, otherwise in_progress", () => {
+  const { store } = freshStore();
+  const a1 = store.addAgentMessage({ title: "Review this", kind: "review" });
+  assert.equal(store.reply(a1.id, { text: "ok", decision: "approved" }).state, "landing");
+  const a2 = store.addAgentMessage({ title: "Another", kind: "review" });
+  assert.equal(store.reply(a2.id, { text: "fix it", decision: "iteration" }).state, "in_progress");
+});
+
+test("moveTask validates the state, moves the card, and optionally drops a thread note", () => {
+  const { store } = freshStore();
+  const task = store.createTask({ title: "Do the thing" });
+  const moved = store.moveTask(task.id, "in_progress", "started working on it");
+  assert.equal(moved.state, "in_progress");
+  assert.equal(moved.thread.length, 1);
+  assert.equal(moved.thread[0].text, "started working on it");
+  assert.equal(moved.thread[0].from, "agent");
+});
+
+test("moveTask throws on an unknown id or an unknown state", () => {
+  const { store } = freshStore();
+  const task = store.createTask({ title: "Do the thing" });
+  assert.throws(() => store.moveTask("u999", "in_progress"));
+  assert.throws(() => store.moveTask(task.id, "not-a-real-state"));
+});
+
+test("setSummary sets msg.summary", () => {
+  const { store } = freshStore();
+  const h1 = store.addHumanMessage("the login button is broken on the settings page", []);
+  const updated = store.setSummary(h1.id, "login button broken");
+  assert.equal(updated.summary, "login button broken");
+  assert.equal(store.list().find((m) => m.id === h1.id).summary, "login button broken");
+});
+
+test("migration assigns state to stateless data loaded from disk: human question->questions, human done->approbation, human other->in_progress, agent kind mapping, replyTo skipped", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "review-board-test-"));
+  fs.writeFileSync(
+    path.join(dir, "messages.json"),
+    JSON.stringify({
+      nextAgentId: 3,
+      nextHumanId: 5,
+      history: [],
+      messages: [
+        { id: "u1", direction: "human", title: "waiting on question", thread: [{ from: "agent", kind: "question", text: "?" }] },
+        { id: "u2", direction: "human", title: "waiting on done", thread: [{ from: "agent", kind: "done", text: "done" }] },
+        { id: "u3", direction: "human", title: "plain feedback, no thread" },
+        { id: "u4", direction: "human", title: "reply vehicle", replyTo: "r1" },
+        { id: "r1", direction: "agent", kind: "question", title: "a question card" },
+        { id: "r2", direction: "agent", kind: "review", title: "a review card" },
+      ],
+    })
+  );
+  process.env.REVIEW_BOARD_DATA_DIR = dir;
+  delete require.cache[require.resolve("../server/store")];
+  const store = require("../server/store");
+  const byId = (id) => store.list().find((m) => m.id === id);
+  assert.equal(byId("u1").state, "questions");
+  assert.equal(byId("u2").state, "approbation");
+  assert.equal(byId("u3").state, "in_progress");
+  assert.equal(byId("u4").state, undefined);
+  assert.equal(byId("r1").state, "questions");
+  assert.equal(byId("r2").state, "approbation");
+});
