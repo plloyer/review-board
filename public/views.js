@@ -63,8 +63,12 @@ function splitSourceTag(title) {
   const m = s.match(SOURCE_TAG_RE);
   return m ? { tag: m[1], rest: s.slice(m[0].length) } : { tag: null, rest: s };
 }
+// Compact source marker: "3C-host" -> "host" — a dim word before the title,
+// not a boxed chip (PL: the chips ate half the card for little information).
 function sourceChipHTML(tag) {
-  return tag ? `<span class="chip chip-source">${esc(tag)}</span>` : "";
+  if (!tag) return "";
+  const short = tag.replace(/^3C-/i, "").toLowerCase();
+  return `<span class="source-tag">${esc(short)}</span>`;
 }
 
 // Shared by card() and the overlay's agent body: a detail line renders as a list
@@ -349,8 +353,10 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
   const inputsKey = messageFingerprint(msg, { blockedNow: blockedBy, pendingCounts });
   return memoize(compactCache, msg, inputsKey, () => {
     const core = deriveCardCore(msg, { blockedBy });
+    // feedback/projet chips dropped: the dot color + backlog grouping already
+    // carry that; only the change-request chip stays (semantic, rare).
     const chip =
-      msg.state === "backlog" && msg.taskKind
+      msg.state === "backlog" && msg.taskKind === "change-request"
         ? `<span class="chip chip-${msg.taskKind}">${esc(TASK_KIND_CHIP_LABEL[msg.taskKind] || msg.taskKind)}</span>`
         : "";
     const priorityChip = priorityChipHTML(msg.priority);

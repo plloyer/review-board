@@ -122,6 +122,7 @@ button:hover { background: #444; }
 .chip-projet { background: #333338; color: #b6b6bc; }
 .chip-change-request { background: #3a2b45; color: #b08fd9; }
 .chip-source { background: #2e3b45; color: #9db8c9; }
+.source-tag { font-size: 10px; color: #77777d; flex-shrink: 0; letter-spacing: 0.03em; }
 .chip-p1 { background: #4a2323; color: #e08a8a; }
 .chip-p3 { background: #333338; color: #8a8a90; }
 .blocked-badge { font-size: 10px; padding: 1px 6px; border-radius: 4px; background: #3a352b; color: #b0a888; cursor: pointer; }

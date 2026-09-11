@@ -87,7 +87,7 @@ test("deriveCardCore centralizes dot/title-split/thread-tail shared by every sur
   };
   const core = Views.deriveCardCore(msg);
   assert.equal(core.sourceTag, "Bot");
-  assert.match(core.sourceChip, /chip-source/);
+  assert.match(core.sourceChip, /source-tag/);
   assert.match(core.shortTitle, /Fix the login button/);
   assert.ok(!core.shortTitle.includes("[Bot]"), "the source tag is stripped out of the short title");
   assert.equal(core.tail.kind, "done");
