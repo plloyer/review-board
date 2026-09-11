@@ -35,7 +35,16 @@
           <span class="column-title">Backlog</span>
           <span class="column-count" id="count-backlog"></span>
         </div>
-        <div class="column-cards" id="cards-backlog"></div>
+        <div class="column-scroll">
+          <div class="column-cards" id="cards-backlog"></div>
+          <div class="column-answered" id="answered-backlog" hidden>
+            <div class="answered-divider">
+              <span class="answered-divider-label">✓ Répondu — l'IA n'a pas encore traité</span>
+              <span class="answered-count" id="answered-count-backlog"></span>
+            </div>
+            <div class="column-cards" id="cards-answered-backlog"></div>
+          </div>
+        </div>
       </section>
 
       <section class="column" id="col-in_progress" data-state="in_progress">
@@ -43,7 +52,16 @@
           <span class="column-title">In Progress</span>
           <span class="column-count" id="count-in_progress"></span>
         </div>
-        <div class="column-cards" id="cards-in_progress"></div>
+        <div class="column-scroll">
+          <div class="column-cards" id="cards-in_progress"></div>
+          <div class="column-answered" id="answered-in_progress" hidden>
+            <div class="answered-divider">
+              <span class="answered-divider-label">✓ Répondu — l'IA n'a pas encore traité</span>
+              <span class="answered-count" id="answered-count-in_progress"></span>
+            </div>
+            <div class="column-cards" id="cards-answered-in_progress"></div>
+          </div>
+        </div>
       </section>
 
       <section class="column" id="col-questions" data-state="questions">
@@ -52,7 +70,16 @@
           <span class="column-count" id="count-questions"></span>
           <span class="column-hint">besoin de toi</span>
         </div>
-        <div class="column-cards" id="cards-questions"></div>
+        <div class="column-scroll">
+          <div class="column-cards" id="cards-questions"></div>
+          <div class="column-answered" id="answered-questions" hidden>
+            <div class="answered-divider">
+              <span class="answered-divider-label">✓ Répondu — l'IA n'a pas encore traité</span>
+              <span class="answered-count" id="answered-count-questions"></span>
+            </div>
+            <div class="column-cards" id="cards-answered-questions"></div>
+          </div>
+        </div>
       </section>
 
       <section class="column" id="col-approbation" data-state="approbation">
@@ -60,7 +87,16 @@
           <span class="column-title">Approbation</span>
           <span class="column-count" id="count-approbation"></span>
         </div>
-        <div class="column-cards" id="cards-approbation"></div>
+        <div class="column-scroll">
+          <div class="column-cards" id="cards-approbation"></div>
+          <div class="column-answered" id="answered-approbation" hidden>
+            <div class="answered-divider">
+              <span class="answered-divider-label">✓ Répondu — l'IA n'a pas encore traité</span>
+              <span class="answered-count" id="answered-count-approbation"></span>
+            </div>
+            <div class="column-cards" id="cards-answered-approbation"></div>
+          </div>
+        </div>
       </section>
 
       <section class="column" id="col-landing" data-state="landing">
@@ -68,7 +104,16 @@
           <span class="column-title">Landing</span>
           <span class="column-count" id="count-landing"></span>
         </div>
-        <div class="column-cards" id="cards-landing"></div>
+        <div class="column-scroll">
+          <div class="column-cards" id="cards-landing"></div>
+          <div class="column-answered" id="answered-landing" hidden>
+            <div class="answered-divider">
+              <span class="answered-divider-label">✓ Répondu — l'IA n'a pas encore traité</span>
+              <span class="answered-count" id="answered-count-landing"></span>
+            </div>
+            <div class="column-cards" id="cards-answered-landing"></div>
+          </div>
+        </div>
       </section>
 
       <section class="column" id="col-closed" data-state="closed" hidden>
@@ -78,7 +123,16 @@
           <span class="column-hint">à retester</span>
           <span class="column-collapse column-collapse-right" title="Collapse">›</span>
         </div>
-        <div class="column-cards" id="cards-closed"></div>
+        <div class="column-scroll">
+          <div class="column-cards" id="cards-closed"></div>
+          <div class="column-answered" id="answered-closed" hidden>
+            <div class="answered-divider">
+              <span class="answered-divider-label">✓ Répondu — l'IA n'a pas encore traité</span>
+              <span class="answered-count" id="answered-count-closed"></span>
+            </div>
+            <div class="column-cards" id="cards-answered-closed"></div>
+          </div>
+        </div>
       </section>
       <div class="col-rail" id="rail-closed" data-state="closed">
         <span class="rail-count" id="railcount-closed"></span>
@@ -100,6 +154,8 @@
     </div>
 
     <script src="marked.min.js"></script>
+    <script src="shared/lifecycle.js"></script>
+    <script src="views.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

@@ -6,6 +6,7 @@ const url = require("url");
 const { createApp } = require("./server/web");
 const store = require("./server/store");
 const push = require("./server/push");
+const { isActionableThreadEntry, unseenActionable } = require("./shared/lifecycle");
 
 // Local-only debugging: lets a CDP client attach to inspect the renderer.
 app.commandLine.appendSwitch("remote-debugging-port", "9222");
@@ -15,19 +16,6 @@ app.commandLine.appendSwitch("remote-debugging-port", "9222");
 app.setAppUserModelId("com.ployer.review-board");
 
 const PORT = 5677;
-
-// A thread entry only matters to the human when it's a question or a finished
-// piece of work — a routine "update" entry is silent (no notification, no badge).
-function isActionable(entry) {
-  return entry && entry.from === "agent" && (entry.kind === "question" || entry.kind === "done");
-}
-
-// True once an actionable entry has landed and the human hasn't seen it yet
-// (threadSeenAt cleared/absent, or the entry postdates the last seen stamp).
-function hasUnseenActionable(m) {
-  const last = (m.thread || [])[((m.thread || []).length || 1) - 1];
-  return isActionable(last) && last.at > (m.threadSeenAt || "");
-}
 
 function startServer() {
   const web = createApp({ clipboard });
@@ -53,7 +41,7 @@ function startServer() {
     for (const m of store.list()) {
       if (m.direction !== "human" || !(m.thread || []).length) continue;
       const last = m.thread[m.thread.length - 1];
-      if (isActionable(last) && last.at > lastThreadNotifiedAt) {
+      if (isActionableThreadEntry(last) && last.at > lastThreadNotifiedAt) {
         lastThreadNotifiedAt = last.at;
         const title = last.kind === "question" ? "Review board — l'IA a besoin de toi" : "Review board — travail terminé";
         notify(title, String(last.text || "").split("\n")[0], m.id);
@@ -102,7 +90,7 @@ function updateBadge() {
   // entry never lights the badge.
   const pending = store
     .list()
-    .some((m) => (m.direction === "agent" && m.status === "open") || (m.direction === "human" && hasUnseenActionable(m)));
+    .some((m) => (m.direction === "agent" && m.status === "open") || (m.direction === "human" && unseenActionable(m)));
   if (pending) mainWin.setOverlayIcon(BADGE, "Items waiting for review");
   else mainWin.setOverlayIcon(null, "");
 }

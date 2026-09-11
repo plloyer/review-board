@@ -1,3 +1,6 @@
+const { unseenActionable, agentAwaitingDecision, awaitingAgent, COLUMN_STATES, activeBlockers } = window.Lifecycle;
+const { imgSrc, deriveCompactView, deriveCardView, deriveSentView, deriveOverlayView, pruneViewCache } = window.Views;
+
 async function fetchJSON(url, opts) {
   const res = await fetch(url, opts);
   if (!res.ok) throw new Error(await res.text());
@@ -7,65 +10,23 @@ async function fetchJSON(url, opts) {
 // msg.id -> array of server-side file paths queued to go out with that reply.
 const pendingImages = new Map();
 
+// Cheap per-message pending-image-count summary — one of the fingerprint inputs
+// derive*View's memoization (public/views.js) uses to decide whether to
+// recompute; views.js has no access to this Map itself, so it's threaded in.
+// Checks all three keys a message's composer could be queued under (reply-text,
+// comment, followup).
+function pendingCountsFor(id) {
+  const sid = String(id);
+  return [pendingImages.get(sid), pendingImages.get(`comment:${sid}`), pendingImages.get(`followup:${sid}`)].map((list) =>
+    list ? list.length : 0
+  );
+}
+
 // msg.id -> draft text stranded by a rebuild into a card shape with no textarea
 // (e.g. a column move). reconcileSection stashes here when it can't find a
 // textarea to restore into; it and renderOverlayBody both re-attempt the
 // restore once a textarea for that id exists again.
 const pendingDrafts = new Map();
-
-function imgSrc(p) {
-  return `/api/image?path=${encodeURIComponent(p)}`;
-}
-
-// Escapes user/agent text interpolated into innerHTML that isn't already
-// markdown-rendered (marked.parse escapes on its own).
-function esc(s) {
-  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-}
-
-// Renders markdown to HTML then reads it back as plain text (via a detached
-// element's textContent) — strips `**`/`#`/`[text](url)`/etc noise instead of
-// just taking the raw first line, which used to let markdown syntax leak into
-// compact surfaces.
-function mdToPlainText(s) {
-  const tmp = document.createElement("div");
-  tmp.innerHTML = marked.parse(String(s ?? ""), { breaks: true });
-  return (tmp.textContent || "").replace(/\s+/g, " ").trim();
-}
-
-// Shared cap for any body text shown in compact mode (subline, inline question
-// context): plain text, no markdown, max 200 chars. Escaped for interpolation.
-function compactSnippet(s) {
-  return esc(mdToPlainText(s).slice(0, 200));
-}
-
-// A title can start with a "[Tag] " prefix meant to render as a small source
-// chip rather than literal text — the raw title/summary in the message data
-// is never touched, only the rendered HTML splits it.
-const SOURCE_TAG_RE = /^\[([^\]]{1,16})\]\s*/;
-function splitSourceTag(title) {
-  const s = String(title ?? "");
-  const m = s.match(SOURCE_TAG_RE);
-  return m ? { tag: m[1], rest: s.slice(m[0].length) } : { tag: null, rest: s };
-}
-function sourceChipHTML(tag) {
-  return tag ? `<span class="chip chip-source">${esc(tag)}</span>` : "";
-}
-
-// Last thread entry that's an AI question/done — the one shape that needs the
-// human back. Split from the "unseen" check below so the Approuver button can
-// use just the shape (regardless of seen state) while badges/routing use both.
-function lastThreadEntry(msg) {
-  const thread = msg.thread || [];
-  return thread[thread.length - 1];
-}
-function isActionableThreadEntry(entry) {
-  return Boolean(entry) && entry.from === "agent" && (entry.kind === "question" || entry.kind === "done");
-}
-function unseenActionable(msg) {
-  const last = lastThreadEntry(msg);
-  return isActionableThreadEntry(last) && last.at > (msg.threadSeenAt || "");
-}
 
 // Same breakpoint as the mobile layout in style.css: on a phone, Enter should just
 // type a newline (no convenient Shift key on the on-screen keyboard) — Send is the
@@ -129,60 +90,38 @@ async function submitThreadComment(el, textSelector, key, title, threadMsgId) {
 // Shared by card() and the overlay's agent body: a detail line renders as a list
 // item unless it's block-level markdown (headings/lists/multiple paragraphs), in
 // which case it gets its own block instead of being crammed into a bullet.
-function renderDetail(d) {
-  const html = marked.parse(d, { breaks: true });
-  const paraCount = (html.match(/<p[\s>]/g) || []).length;
-  const isBlock = /<h[1-6][\s>]/.test(html) || /<ul[\s>]/.test(html) || /<ol[\s>]/.test(html) || paraCount > 1;
-  if (isBlock) return { block: true, html: `<div class="md">${html}</div>` };
-  return { block: false, html: `<li>${marked.parseInline(d, { breaks: true })}</li>` };
-}
+// (moved to public/views.js as renderDetail — used by deriveCardView there)
 
 function card(msg) {
+  const view = deriveCardView(msg, { pendingCounts: pendingCountsFor(msg.id) });
   const el = document.createElement("section");
   el.className = `card ${msg.kind} ${msg.status}`;
   el.dataset.msgId = msg.id;
-
-  const images = (msg.images || [])
-    .map((img) => `<img src="${imgSrc(img.path)}" class="thumb" data-msg-id="${msg.id}" />`)
-    .join("");
-
-  const videos = (msg.videos || [])
-    .map((v) => `<video src="${imgSrc(v.path)}" controls preload="metadata"></video>`)
-    .join("");
-
-  const options = (msg.options || [])
-    .map((opt) => `<button class="opt" data-opt="${encodeURIComponent(opt)}">${esc(opt)}</button>`)
-    .join("");
-
-  const renderedDetails = (msg.details || []).map(renderDetail);
-  const detailItems = renderedDetails.filter((r) => !r.block).map((r) => r.html).join("");
-  const detailBlocks = renderedDetails.filter((r) => r.block).map((r) => r.html).join("");
-  const details = detailItems;
 
   const followupKey = `followup:${msg.id}`;
 
   el.innerHTML = `
     <div class="card-head">
-      <span class="kind-badge">${msg.kind}</span>
-      <strong>${esc(msg.title)}</strong>
-      ${msg.project ? `<span class="project">${esc(msg.project)}</span>` : ""}
+      <span class="kind-badge">${view.kindBadge}</span>
+      <strong>${view.title}</strong>
+      ${view.project}
     </div>
-    ${msg.context ? `<div class="context md">${marked.parse(msg.context, { breaks: true })}</div>` : ""}
-    ${details ? `<ul>${details}</ul>` : ""}
-    ${detailBlocks}
-    ${images ? `<div class="images">${images}</div>` : ""}
-    ${videos ? `<div class="videos">${videos}</div>` : ""}
+    ${view.contextHTML}
+    ${view.details ? `<ul>${view.details}</ul>` : ""}
+    ${view.detailBlocks}
+    ${view.images ? `<div class="images">${view.images}</div>` : ""}
+    ${view.videos ? `<div class="videos">${view.videos}</div>` : ""}
     ${
       msg.status === "answered"
-        ? `<div class="answered">${msg.reply.decision ? `[${esc(msg.reply.decision)}] ` : ""}${esc(msg.reply.optionChosen || msg.reply.text || "(no comment)")}</div>
+        ? `<div class="answered">${view.answeredHTML}</div>
           <div class="reply-row">
             <textarea class="growable-text followup-text" rows="1" placeholder="Add a follow-up comment… (Shift+Enter for a new line, paste an image to attach)"></textarea>
             <button class="send-followup">Send</button>
           </div>
           <div class="pending-row" data-pending-key="${followupKey}"></div>`
         : `<div class="reply-row">
-            ${msg.kind === "review" ? `<button class="approve-btn">✅ Approve</button>` : ""}
-            ${options}
+            ${view.isReview ? `<button class="approve-btn">✅ Approve</button>` : ""}
+            ${view.options}
             <textarea class="growable-text reply-text" rows="1" placeholder="Comment… (Shift+Enter for a new line, paste an image to attach)"></textarea>
             <label class="attach-btn">📎<input type="file" accept="image/*" class="attach-input" hidden /></label>
             <button class="send-reply">Reply</button>
@@ -673,21 +612,6 @@ function sentCard(msg, delivered) {
   const msgId = String(msg.id);
   const commentKey = `comment:${msgId}`;
 
-  const subline = () => {
-    const thread = msg.thread || [];
-    const last = thread[thread.length - 1];
-    if (last) {
-      const snippet = compactSnippet(last.text);
-      if (last.from === "human") return `<span class="ia-reply">↳ Toi : ${snippet}</span>`;
-      if (last.kind === "question") return `<span class="ia-reply ia-question">❓ L'IA a besoin de toi : ${snippet}</span>`;
-      if (last.kind === "done") return `<span class="ia-reply ia-done">✅ Terminé — à valider : ${snippet}</span>`;
-      return `<span class="ia-reply">↳ IA : ${snippet}</span>`;
-    }
-    if (msg.acknowledgedAt) return "✓ Lu par l'IA · en attente d'une réponse";
-    if (delivered || msg.lastDeliveredAt) return "Livré — attend confirmation";
-    return "En attente de livraison";
-  };
-
   const submitComment = () => submitThreadComment(el, ".comment-text", commentKey, msg.title, msg.id);
 
   const approveIssueInPlace = async () => {
@@ -707,29 +631,25 @@ function sentCard(msg, delivered) {
   };
 
   function paint() {
+    const view = deriveSentView(msg, delivered, { pendingCounts: pendingCountsFor(msg.id) });
     const expanded = expandedSent.has(msgId);
-    const read = Boolean(msg.acknowledgedAt);
-    el.className = (delivered ? "card sent answered" : "card sent") + (expanded ? " expanded" : "");
-    const cancelBtn = !delivered && !read ? `<button class="cancel-sent" title="Cancel this message">×</button>` : "";
+    el.className = view.className + (expanded ? " expanded" : "");
     // "Approuver" shows whenever the last thread entry needs a human (question/done),
     // seen or not — narrower than the dot's "unseen" highlight.
-    const approveBtn = isActionableThreadEntry(lastThreadEntry(msg)) ? `<button class="approve-issue-btn">✅ Approuver</button>` : "";
+    const cancelBtn = view.cancelable ? `<button class="cancel-sent" title="Cancel this message">×</button>` : "";
+    const approveBtn = view.approveBtn ? `<button class="approve-issue-btn">✅ Approuver</button>` : "";
 
     if (expanded) {
-      const images = (msg.images || []).map((img) => `<img src="${imgSrc(img.path)}" class="thumb" />`).join("");
-      const thread = (msg.thread || [])
-        .map((t) => `<div class="thread-entry from-${t.from}">${marked.parse(t.text, { breaks: true })}</div>`)
-        .join("");
       el.innerHTML = `
         <div class="issue-row">
-          <span class="issue-dot${unseenActionable(msg) ? " actionable" : ""}"></span>
-          <div class="issue-full">${esc(msg.summary || msg.title)}</div>
+          <span class="issue-dot${view.unseenDot ? " actionable" : ""}"></span>
+          <div class="issue-full">${view.summaryTitle}</div>
           ${cancelBtn}
           <span class="archive-link">Archiver</span>
         </div>
-        ${images ? `<div class="images">${images}</div>` : ""}
-        ${thread ? `<div class="thread">${thread}</div>` : ""}
-        <div class="issue-sub">${subline()}</div>
+        ${view.images ? `<div class="images">${view.images}</div>` : ""}
+        ${view.thread ? `<div class="thread">${view.thread}</div>` : ""}
+        <div class="issue-sub">${view.sub}</div>
         <div class="reply-row">
           ${approveBtn}
           <textarea class="growable-text comment-text" rows="1" placeholder="Commenter… (Shift+Enter for a new line, paste an image to attach)"></textarea>
@@ -756,16 +676,14 @@ function sentCard(msg, delivered) {
         v.setAttribute("controls", "");
       });
     } else {
-      const firstImg = (msg.images || [])[0];
-      const miniThumb = firstImg ? `<img src="${imgSrc(firstImg.path)}" class="thumb mini-thumb" />` : "";
       el.innerHTML = `
         <div class="issue-row">
-          <span class="issue-dot${unseenActionable(msg) ? " actionable" : ""}"></span>
+          <span class="issue-dot${view.unseenDot ? " actionable" : ""}"></span>
           <div class="issue-main">
-            <div class="issue-title">${esc(msg.summary || msg.title)}</div>
-            <div class="issue-sub">${subline()}</div>
+            <div class="issue-title">${view.summaryTitle}</div>
+            <div class="issue-sub">${view.sub}</div>
           </div>
-          ${miniThumb}
+          ${view.miniThumb}
           ${cancelBtn}
           ${approveBtn}
           <span class="archive-link">Archiver</span>
@@ -835,50 +753,7 @@ function sentCard(msg, delivered) {
 // overlay. The History section above still uses card()/sentCard() unchanged.
 // ============================================================================
 
-const COLUMN_STATES = ["backlog", "in_progress", "questions", "approbation", "landing", "closed"];
-const STATE_LABEL = {
-  backlog: "backlog",
-  in_progress: "in progress",
-  questions: "questions",
-  approbation: "approbation",
-  landing: "landing",
-  closed: "closed",
-};
-
-// The dot's color is normally the column's own accent, except Backlog (where it
-// tells feedback from a project task apart) and Closed (no dot at all, per mock).
-function dotColor(msg) {
-  if (msg.state === "closed") return null;
-  if (msg.state === "backlog") return msg.taskKind === "feedback" ? "#6cbf6c" : "#8a8a90";
-  return { in_progress: "#4a90d9", questions: "#d9a441", approbation: "#6cbf6c", landing: "#b08fd9" }[msg.state] || "#8a8a90";
-}
-
-// The compact card's second line: the last thread entry if there is one (same
-// kind/color convention as sentCard's subline above), else — for a not-yet-
-// threaded r-card — its own context/question text, else a delivery-state hint
-// for a not-yet-threaded human card.
-function compactSubline(msg) {
-  const thread = msg.thread || [];
-  const last = thread[thread.length - 1];
-  if (last) {
-    const snippet = compactSnippet(last.text);
-    if (last.from === "human") return { cls: "sub-human", text: `↳ Toi : ${snippet}` };
-    if (last.kind === "question") return { cls: "sub-question", text: `❓ ${snippet}` };
-    if (last.kind === "done") return { cls: "sub-done", text: `✅ ${snippet}` };
-    return { cls: "", text: `↳ IA : ${snippet}` };
-  }
-  if (msg.direction === "agent" && msg.context) {
-    const snippet = compactSnippet(msg.context);
-    if (msg.kind === "question") return { cls: "sub-question", text: `❓ ${snippet}` };
-    if (msg.kind === "review") return { cls: "sub-done", text: snippet };
-    return { cls: "", text: snippet };
-  }
-  if (msg.direction === "human") {
-    if (msg.acknowledgedAt) return { cls: "", text: "✓ Lu par l'IA · en attente d'une réponse" };
-    if (msg.lastDeliveredAt) return { cls: "", text: "Livré — attend confirmation" };
-  }
-  return null;
-}
+// (compactSubline moved to public/views.js — used by deriveCompactView there)
 
 // Standalone (unlike sentCard's own local closure) since it's shared by the
 // compact card and the overlay footer, neither of which has sentCard's
@@ -899,141 +774,134 @@ async function approveIssue(msg) {
   refresh(true);
 }
 
-function compactCard(msg) {
+// Shared by compactCard and the overlay panel: each blocker gets its own badge
+// (data-blocker-id) — clicking one scrolls/flashes that card, expanding its
+// Backlog/Closed rail first if it's currently collapsed (an element inside a
+// `hidden` column has no layout box, so scrollIntoView on it would silently
+// no-op without this).
+function wireBlockedBadges(container) {
+  container.querySelectorAll(".blocked-badge").forEach((badge) => {
+    badge.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const blockerId = e.currentTarget.dataset.blockerId;
+      const target = document.querySelector(`[data-msg-id="${CSS.escape(blockerId)}"]`);
+      if (!target) return;
+      const col = target.closest(".column");
+      if (col?.hidden) setCollapsed(col.dataset.state, false);
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      target.classList.add("flash");
+      setTimeout(() => target.classList.remove("flash"), 1000);
+    });
+  });
+}
+
+function compactCard(msg, blockedInfo) {
+  const view = deriveCompactView(msg, blockedInfo);
   const el = document.createElement("div");
-  el.className = "ccard";
+  el.className = `ccard${view.blocked ? " blocked" : ""}${view.awaitingAgent ? " repondu" : ""}`;
   el.dataset.msgId = msg.id;
-
-  const dot = dotColor(msg);
-  const chip = msg.state === "backlog" && msg.taskKind ? `<span class="chip chip-${msg.taskKind}">${esc(msg.taskKind)}</span>` : "";
-  const { tag: sourceTag, rest: titleRest } = splitSourceTag(msg.summary || msg.title);
-  const sourceChip = sourceChipHTML(sourceTag);
-  const title = esc(titleRest);
-  const firstImg = (msg.images || [])[0];
-  const miniThumb = firstImg ? `<img src="${imgSrc(firstImg.path)}" class="thumb mini-thumb" />` : "";
-  const undelivered = msg.direction === "human" && !msg.replyTo && !msg.lastDeliveredAt && !msg.acknowledgedAt;
-  const cancelBtn = undelivered ? `<button class="cancel-sent" title="Annuler">×</button>` : "";
-  const sub = compactSubline(msg);
-
-  let actionsHTML = "";
-  if (msg.state === "questions" && msg.direction === "agent") {
-    const options = (msg.options || [])
-      .map((opt) => `<button class="opt" data-opt="${encodeURIComponent(opt)}">${esc(opt)}</button>`)
-      .join("");
-    actionsHTML = `
-      <div class="ccard-actions">
-        ${msg.kind === "review" ? `<button class="approve-btn">✅ Approve</button>` : ""}
-        ${options}
-        <textarea class="growable-text reply-text" rows="1" placeholder="Répondre…"></textarea>
-        <label class="attach-btn">📎<input type="file" accept="image/*" class="attach-input" hidden /></label>
-        <button class="send-reply">Reply</button>
-      </div>
-      <div class="pending-row" data-pending-key="${msg.id}"></div>`;
-  } else if (msg.state === "questions" && msg.direction === "human") {
-    const commentKey = `comment:${msg.id}`;
-    const approveBtn = isActionableThreadEntry(lastThreadEntry(msg)) ? `<button class="approve-issue-btn">✅ Approuver</button>` : "";
-    actionsHTML = `
-      <div class="ccard-actions">
-        ${approveBtn}
-        <textarea class="growable-text comment-text" rows="1" placeholder="Répondre…"></textarea>
-        <button class="send-comment">Send</button>
-      </div>
-      <div class="pending-row" data-pending-key="${commentKey}"></div>`;
-  } else if (msg.state === "approbation") {
-    actionsHTML = `
-      <div class="ccard-actions">
-        <button class="approve-btn">✅ Approuver</button>
-        <button class="open-overlay-fix">À corriger…</button>
-      </div>`;
-  } else if (msg.state === "closed") {
-    actionsHTML = `<div class="ccard-actions"><button class="archive-link-btn">Testé ✓ Archiver</button></div>`;
-  }
 
   el.innerHTML = `
     <div class="ccard-row">
-      ${dot ? `<span class="ccard-dot" style="background:${dot}"></span>` : ""}
-      ${chip}
-      ${sourceChip}
-      <span class="ccard-title">${title}</span>
-      ${miniThumb}
-      ${cancelBtn}
+      ${view.dot ? `<span class="ccard-dot" style="background:${view.dot}"></span>` : ""}
+      ${view.chip}
+      ${view.priorityChip}
+      ${view.sourceChip}
+      <span class="ccard-title">${view.title}</span>
+      ${view.miniThumb}
+      ${view.cancelBtn}
+      ${view.marker || ""}
     </div>
-    ${sub ? `<div class="ccard-sub ${sub.cls}">${sub.text}</div>` : ""}
-    ${actionsHTML}
+    ${view.blockedBadge ? `<div class="blocked-row">${view.blockedBadge}</div>` : ""}
+    ${view.sub ? `<div class="ccard-sub ${view.sub.cls}">${view.sub.text}</div>` : ""}
+    ${view.actionsHTML}
   `;
 
-  if (msg.state === "questions" && msg.direction === "agent") {
-    el.querySelectorAll(".opt").forEach((btn) =>
-      btn.addEventListener("click", () => sendReply(msg.id, { optionChosen: decodeURIComponent(btn.dataset.opt) }))
-    );
-    const imgsFor = () => (pendingImages.get(msg.id) || []).map((p) => ({ path: p }));
-    el.querySelector(".approve-btn")?.addEventListener("click", async () => {
-      const ta = el.querySelector(".reply-text");
-      const text = ta.value;
-      ta.value = "";
-      try {
-        await sendReply(msg.id, { decision: "approved", text, images: imgsFor() });
-      } catch {
-        ta.value = text;
-      }
-    });
-    const submitReply = async () => {
-      const ta = el.querySelector(".reply-text");
-      const text = ta.value;
-      const imgs = imgsFor();
-      if (!text.trim() && !imgs.length) return;
-      ta.value = "";
-      try {
-        await sendReply(msg.id, { decision: "iteration", text, images: imgs });
-      } catch {
-        ta.value = text;
-      }
-    };
-    el.querySelector(".send-reply").addEventListener("click", submitReply);
-    el.querySelector(".reply-text").addEventListener("keydown", (e) => {
-      if (submitsOnEnter(e)) {
-        e.preventDefault();
-        submitReply();
-      }
-    });
-    el.querySelector(".attach-input").addEventListener("change", async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      addPendingImage(msg.id, await uploadFile(file));
-    });
-    wirePasteToAttach(el.querySelector(".reply-text"), msg.id);
-  } else if (msg.state === "questions" && msg.direction === "human") {
-    const commentKey = `comment:${msg.id}`;
-    const submitComment = () => submitThreadComment(el, ".comment-text", commentKey, msg.title, msg.id);
-    el.querySelector(".send-comment").addEventListener("click", submitComment);
-    el.querySelector(".comment-text").addEventListener("keydown", (e) => {
-      if (submitsOnEnter(e)) {
-        e.preventDefault();
-        submitComment();
-      }
-    });
-    el.querySelector(".approve-issue-btn")?.addEventListener("click", () => approveIssue(msg));
-    wirePasteToAttach(el.querySelector(".comment-text"), commentKey);
-  } else if (msg.state === "approbation") {
-    el.querySelector(".approve-btn").addEventListener("click", () => {
-      if (msg.direction === "agent") sendReply(msg.id, { decision: "approved", text: "", images: [] });
-      else approveIssue(msg);
-    });
-    el.querySelector(".open-overlay-fix").addEventListener("click", (e) => {
-      e.stopPropagation();
-      openOverlay(msg, el, { focusReply: true });
-    });
-  } else if (msg.state === "closed") {
+  wireBlockedBadges(el);
+
+  // A Répondu card renders actionsHTML: "" except when msg.state is "closed"
+  // (wired unconditionally below, since that's the one action it keeps) —
+  // nothing else here to bind to. It can still receive a dropped image though
+  // (wireDropToAttach below is unconditional too).
+  if (!view.awaitingAgent) {
+    if (msg.state === "questions" && msg.direction === "agent") {
+      el.querySelectorAll(".opt").forEach((btn) =>
+        btn.addEventListener("click", () => sendReply(msg.id, { optionChosen: decodeURIComponent(btn.dataset.opt) }))
+      );
+      const imgsFor = () => (pendingImages.get(msg.id) || []).map((p) => ({ path: p }));
+      el.querySelector(".approve-btn")?.addEventListener("click", async () => {
+        const ta = el.querySelector(".reply-text");
+        const text = ta.value;
+        ta.value = "";
+        try {
+          await sendReply(msg.id, { decision: "approved", text, images: imgsFor() });
+        } catch {
+          ta.value = text;
+        }
+      });
+      const submitReply = async () => {
+        const ta = el.querySelector(".reply-text");
+        const text = ta.value;
+        const imgs = imgsFor();
+        if (!text.trim() && !imgs.length) return;
+        ta.value = "";
+        try {
+          await sendReply(msg.id, { decision: "iteration", text, images: imgs });
+        } catch {
+          ta.value = text;
+        }
+      };
+      el.querySelector(".send-reply").addEventListener("click", submitReply);
+      el.querySelector(".reply-text").addEventListener("keydown", (e) => {
+        if (submitsOnEnter(e)) {
+          e.preventDefault();
+          submitReply();
+        }
+      });
+      el.querySelector(".attach-input").addEventListener("change", async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        addPendingImage(msg.id, await uploadFile(file));
+      });
+      wirePasteToAttach(el.querySelector(".reply-text"), msg.id);
+    } else if (msg.state === "questions" && msg.direction === "human") {
+      const commentKey = `comment:${msg.id}`;
+      const submitComment = () => submitThreadComment(el, ".comment-text", commentKey, msg.title, msg.id);
+      el.querySelector(".send-comment").addEventListener("click", submitComment);
+      el.querySelector(".comment-text").addEventListener("keydown", (e) => {
+        if (submitsOnEnter(e)) {
+          e.preventDefault();
+          submitComment();
+        }
+      });
+      el.querySelector(".approve-issue-btn")?.addEventListener("click", () => approveIssue(msg));
+      wirePasteToAttach(el.querySelector(".comment-text"), commentKey);
+    } else if (msg.state === "approbation") {
+      el.querySelector(".approve-btn").addEventListener("click", () => {
+        if (msg.direction === "agent") sendReply(msg.id, { decision: "approved", text: "", images: [] });
+        else approveIssue(msg);
+      });
+      el.querySelector(".open-overlay-fix").addEventListener("click", (e) => {
+        e.stopPropagation();
+        openOverlay(msg, el, { focusReply: true, blockedBy: blockedInfo?.blockedBy });
+      });
+    }
+  }
+  // Unconditional on awaitingAgent: a closed+Répondu card keeps the archive
+  // action too (deriveCompactView's actionsHTML includes it either way).
+  if (msg.state === "closed") {
     el.querySelector(".archive-link-btn").addEventListener("click", () => {
       fetchJSON(`/api/messages/${msg.id}/archive`, { method: "POST" }).then(() => refresh(true));
     });
   }
+  // Any compact card can receive a dropped image, not just ones with a visible
+  // composer — same key the overlay would attach to for this message. Also
+  // unconditional: a Répondu card accepts drops again (comment:<id>, like other
+  // non-decision cards).
+  wireDropToAttach(el, msg.direction === "agent" && agentAwaitingDecision(msg) ? msg.id : `comment:${msg.id}`);
 
   el.querySelectorAll(".growable-text").forEach((ta) => ta.addEventListener("input", () => autoGrow(ta)));
   el.querySelectorAll(".pending-row").forEach((row) => renderPendingChips(row, row.dataset.pendingKey));
-  // Any compact card can receive a dropped image, not just ones with a visible
-  // composer — same key the overlay would attach to for this message.
-  wireDropToAttach(el, msg.direction === "agent" && agentAwaitingDecision(msg) ? msg.id : `comment:${msg.id}`);
 
   // Delegated: click-to-open overlay, mini-thumb, cancel — wired regardless of
   // state. Buttons/textareas/inputs already handled their own click above; this
@@ -1055,34 +923,13 @@ function compactCard(msg) {
     }
     if (e.target.closest("button, textarea, input, label, a")) return;
     if (String(window.getSelection && window.getSelection())) return;
-    openOverlay(msg, el);
+    openOverlay(msg, el, { blockedBy: blockedInfo?.blockedBy });
   });
 
   return el;
 }
 
-function compactSig(m) {
-  const thread = m.thread || [];
-  return JSON.stringify([
-    m.state,
-    m.status,
-    m.kind,
-    m.direction,
-    m.summary,
-    m.title,
-    m.taskKind,
-    (m.images || [])[0] && m.images[0].path,
-    m.options,
-    m.context,
-    m.reply && m.reply.decision,
-    m.reply && m.reply.at,
-    thread.length,
-    thread[thread.length - 1],
-    Boolean(m.lastDeliveredAt),
-    Boolean(m.acknowledgedAt),
-    Boolean(m.deliveredAt),
-  ]);
-}
+// (compactSig deleted — reconcileSection now signs with JSON.stringify(deriveCompactView(m)))
 
 // ---------------------------------------------------------------------------
 // Backlog/Closed collapse rails — click a rail to expand, click the column's
@@ -1123,141 +970,9 @@ function setCollapsed(state, collapsed) {
 
 let openCardId = null;
 
-function overlayHeader(msg) {
-  const dot = dotColor(msg) || "#77777d";
-  const kindBadge = msg.direction === "agent" ? `<span class="kind-badge">${esc(msg.kind)}</span>` : "";
-  const { tag: sourceTag, rest: titleRest } = splitSourceTag(msg.summary || msg.title);
-  const subtitle = msg.summary ? `<div class="overlay-subtitle">${esc(msg.title)}</div>` : "";
-  return `
-    <div class="overlay-head">
-      <span class="ccard-dot" style="background:${dot}"></span>
-      ${sourceChipHTML(sourceTag)}
-      <div class="overlay-title-wrap">
-        <strong class="overlay-title">${esc(titleRest)}</strong>
-        ${subtitle}
-      </div>
-      ${kindBadge}
-      <span class="overlay-badge">${esc(STATE_LABEL[msg.state] || msg.state)}</span>
-      ${msg.direction === "human" ? `<span class="archive-link" id="overlayArchive">Archiver</span>` : ""}
-      <button class="overlay-close" id="overlayClose">✕</button>
-    </div>`;
-}
-
-// A card in "questions" or "approbation" is awaiting a FRESH decision right
-// now, even if `status` is still "answered" from an earlier round (move_task
-// can send an already-answered r-card back for another look) — the reply row
-// (with Approve/options) belongs in the footer then, never the plain followup
-// box, which is only for a card that's actually done. Shared by the body
-// (which HTML to render) and the footer wiring (which selectors exist).
-function agentAwaitingDecision(msg) {
-  return msg.state === "questions" || msg.state === "approbation";
-}
-
-// Shared by overlayAgentBody and overlayHumanBody — one message's thread can
-// carry entries from either side; rendered identically regardless of which
-// body the message ends up in.
-function threadHTML(msg) {
-  return (msg.thread || [])
-    .map((t) => `<div class="thread-entry from-${t.from}">${marked.parse(t.text, { breaks: true })}</div>`)
-    .join("");
-}
-
-function overlayAgentBody(msg) {
-  const images = (msg.images || [])
-    .map((img) => `<img src="${imgSrc(img.path)}" class="thumb" data-msg-id="${msg.id}" />`)
-    .join("");
-  const videos = (msg.videos || []).map((v) => `<video src="${imgSrc(v.path)}" controls preload="metadata"></video>`).join("");
-  const options = (msg.options || [])
-    .map((opt) => `<button class="opt" data-opt="${encodeURIComponent(opt)}">${esc(opt)}</button>`)
-    .join("");
-  const renderedDetails = (msg.details || []).map(renderDetail);
-  const detailItems = renderedDetails.filter((r) => !r.block).map((r) => r.html).join("");
-  const detailBlocks = renderedDetails.filter((r) => r.block).map((r) => r.html).join("");
-  const thread = threadHTML(msg);
-  const followupKey = `followup:${msg.id}`;
-  const awaitingDecision = agentAwaitingDecision(msg);
-
-  const bodyHTML = `
-    ${msg.context ? `<div class="context md">${marked.parse(msg.context, { breaks: true })}</div>` : ""}
-    ${detailItems ? `<ul>${detailItems}</ul>` : ""}
-    ${detailBlocks}
-    ${images ? `<div class="images">${images}</div>` : ""}
-    ${videos ? `<div class="videos">${videos}</div>` : ""}
-    ${thread ? `<div class="thread">${thread}</div>` : ""}
-  `;
-
-  const footerHTML =
-    msg.status === "answered" && !awaitingDecision
-      ? `<div class="answered">${msg.reply.decision ? `[${esc(msg.reply.decision)}] ` : ""}${esc(msg.reply.optionChosen || msg.reply.text || "(no comment)")}</div>
-        <div class="reply-row overlay-footer-row">
-          <textarea class="growable-text followup-text" rows="1" placeholder="Add a follow-up comment… (Shift+Enter for a new line, paste an image to attach)"></textarea>
-          <button class="send-followup">Send</button>
-        </div>
-        <div class="pending-row" data-pending-key="${followupKey}"></div>`
-      : `<div class="reply-row overlay-footer-row">
-          ${msg.kind === "review" || msg.state === "approbation" ? `<button class="approve-btn">✅ Approuver</button>` : ""}
-          ${options}
-          <textarea class="growable-text reply-text" rows="1" placeholder="Commenter… (Ctrl+V ou glisse une image)"></textarea>
-          <label class="attach-btn">📎<input type="file" accept="image/*" class="attach-input" hidden /></label>
-          <button class="send-reply">Reply</button>
-        </div>
-        <div class="pending-row" data-pending-key="${msg.id}"></div>`;
-
-  return { bodyHTML, footerHTML };
-}
-
-function overlayHumanBody(msg) {
-  const images = (msg.images || []).map((img) => `<img src="${imgSrc(img.path)}" class="thumb" />`).join("");
-  const thread = threadHTML(msg);
-  const commentKey = `comment:${msg.id}`;
-  const approveBtn = isActionableThreadEntry(lastThreadEntry(msg)) ? `<button class="approve-issue-btn">✅ Approuver</button>` : "";
-
-  const bodyHTML = `
-    ${images ? `<div class="images">${images}</div>` : ""}
-    ${thread ? `<div class="thread">${thread}</div>` : ""}
-  `;
-
-  const footerHTML = `
-    <div class="reply-row overlay-footer-row">
-      ${approveBtn}
-      <textarea class="growable-text comment-text" rows="1" placeholder="Commenter… (Ctrl+V ou glisse une image)"></textarea>
-      <button class="send-comment">Send</button>
-    </div>
-    <div class="pending-row" data-pending-key="${commentKey}"></div>
-  `;
-
-  return { bodyHTML, footerHTML };
-}
-
-function overlaySig(m) {
-  return m.direction === "agent"
-    ? JSON.stringify([
-        m.id,
-        m.status,
-        m.reply,
-        m.thread,
-        Boolean(m.lastDeliveredAt),
-        (m.images || []).map((i) => i.path),
-        (m.videos || []).map((v) => v.path),
-        m.options,
-        m.details,
-        m.context,
-        m.summary,
-        m.title,
-        m.state,
-      ])
-    : JSON.stringify([
-        m.id,
-        (m.thread || []).length,
-        m.thread,
-        (m.images || []).map((i) => i.path),
-        m.summary,
-        m.title,
-        m.state,
-        m.acknowledgedAt,
-        Boolean(m.lastDeliveredAt),
-      ]);
-}
+// (overlayHeader/overlayAgentBody/overlayHumanBody/threadHTML moved to
+// public/views.js as deriveOverlayView; overlaySig deleted — reconcileOverlay
+// now signs with JSON.stringify(deriveOverlayView(m)))
 
 function wireOverlayMedia(panel, msg) {
   panel.querySelectorAll(".thumb").forEach((img) =>
@@ -1361,7 +1076,7 @@ function wireOverlayFooter(panel, msg) {
 // Re-renders the overlay's content from `msg` in place — preserving scroll and
 // any unsent draft — and re-wires it. Called both on open and, from refresh(),
 // whenever a live update changes the open card's sig.
-function renderOverlayBody(msg) {
+function renderOverlayBody(msg, blockedBy = []) {
   const panel = document.getElementById("overlayPanel");
   const prevScroll = panel.querySelector(".overlay-scroll");
   const scrollBefore = prevScroll ? prevScroll.scrollTop : 0;
@@ -1371,9 +1086,9 @@ function renderOverlayBody(msg) {
   // B's overlay the moment B opens with A's textarea still sitting in the DOM.
   const sameCardDraft = prevTa && panel.dataset.msgId === String(msg.id) ? prevTa.value : "";
 
-  const { bodyHTML, footerHTML } = msg.direction === "agent" ? overlayAgentBody(msg) : overlayHumanBody(msg);
-  panel.innerHTML = `${overlayHeader(msg)}<div class="overlay-scroll">${bodyHTML}</div><div class="overlay-footer">${footerHTML}</div>`;
-  panel.dataset.sig = overlaySig(msg);
+  const view = deriveOverlayView(msg, { blockedBy, pendingCounts: pendingCountsFor(msg.id) });
+  panel.innerHTML = `${view.headerHTML}<div class="overlay-scroll">${view.bodyHTML}</div><div class="overlay-footer">${view.footerHTML}</div>`;
+  panel.dataset.sig = JSON.stringify(view);
   panel.dataset.msgId = String(msg.id);
 
   const scrollEl = panel.querySelector(".overlay-scroll");
@@ -1422,7 +1137,7 @@ function openOverlay(msg, cardEl, opts = {}) {
   const backdrop = document.getElementById("overlayBackdrop");
   const panel = document.getElementById("overlayPanel");
   backdrop.hidden = false;
-  renderOverlayBody(msg);
+  renderOverlayBody(msg, opts.blockedBy || []);
 
   // FLIP: jump the (now naturally centered) panel back to the clicked card's
   // rect via transform, then transition to identity on the next frame.
@@ -1485,49 +1200,11 @@ document.getElementById("historyToggle").classList.toggle("active", showAnswered
 // including the pendingImages chips, since those are baked into the card's HTML
 // too. Unchanged sig = the existing DOM node is left completely alone (no rebuild,
 // no move), which is what keeps a playing <video> playing across a refresh.
-function cardSig(m) {
-  return JSON.stringify([
-    m.id,
-    m.direction,
-    m.kind,
-    m.status,
-    m.reply && m.reply.decision,
-    m.reply && m.reply.optionChosen,
-    m.reply && m.reply.text,
-    m.reply && m.reply.at,
-    // Presence only, never the raw timestamp: the server re-stamps lastDeliveredAt
-    // on every agent poll (can be every 500ms), so the raw value would rebuild
-    // every deliverable card on every poll.
-    Boolean(m.lastDeliveredAt),
-    Boolean(m.deliveredAt),
-    (m.images || []).map((i) => i.path),
-    (m.videos || []).map((v) => v.path),
-    m.options,
-    m.details,
-    m.context,
-    m.title,
-    m.project,
-  ]);
-}
-
-function sentSig(m, delivered) {
-  const thread = m.thread || [];
-  return JSON.stringify([
-    m.id,
-    delivered,
-    Boolean(m.lastDeliveredAt),
-    m.readAt,
-    m.acknowledgedAt,
-    // threadSeenAt is deliberately NOT in the sig: expanding a card posts /seen,
-    // and rebuilding the card the user just opened makes it flash. The dot is
-    // updated optimistically in paint() instead.
-    thread.length,
-    thread[thread.length - 1],
-    (m.images || []).map((i) => i.path),
-    m.summary,
-    m.title,
-  ]);
-}
+// (cardSig/sentSig deleted — reconcileSection now signs History cards with
+// JSON.stringify(deriveCardView(m)) / JSON.stringify(deriveSentView(m, true)).
+// threadSeenAt is deliberately never in deriveSentView: expanding a card posts
+// /seen, and rebuilding the card the user just opened makes it flash — the dot
+// is updated optimistically in sentCard's own paint() instead.)
 
 // `force: true` is for explicit user actions (sending a reply, toggling History) —
 // those must always re-render, even though the just-submitted textarea still holds
@@ -1605,6 +1282,7 @@ async function refresh(force) {
   for (const id of [...pendingDrafts.keys()]) {
     if (!liveAndHistoryIds.has(id)) pendingDrafts.delete(id);
   }
+  pruneViewCache(liveAndHistoryIds);
 
   // Every live card that belongs on the board carries a kanban `state` (a
   // replyTo human message is a thread-reply delivery vehicle and has none).
@@ -1612,9 +1290,15 @@ async function refresh(force) {
   for (const s of COLUMN_STATES) byState[s] = [];
   for (const m of live) if (byState[m.state]) byState[m.state].push(m);
   for (const s of COLUMN_STATES) byState[s].reverse(); // newest first
-  // Feedback always outranks a project task within Backlog (stable sort keeps
-  // the newest-first order within each group).
-  byState.backlog.sort((a, b) => (a.taskKind === "feedback" ? 0 : 1) - (b.taskKind === "feedback" ? 0 : 1));
+  // Priority (1 first, absent = 2) is a stable sort on top of newest-first, in
+  // every column — applied before the backlog-only taskKind sort below so that
+  // sort's grouping remains the FIRST key (stable sort preserves this order
+  // within each group).
+  for (const s of COLUMN_STATES) byState[s].sort((a, b) => (a.priority || 2) - (b.priority || 2));
+  // Within Backlog: feedback, then change-request, then projet (stable sort
+  // keeps the priority/newest-first order within each group).
+  const BACKLOG_RANK = { feedback: 0, "change-request": 1 };
+  byState.backlog.sort((a, b) => (BACKLOG_RANK[a.taskKind] ?? 2) - (BACKLOG_RANK[b.taskKind] ?? 2));
 
   // Archived stuff only (store.history()) — a still-live card, however settled-
   // looking (status "answered" sitting in an unfinished state, e.g. re-asked via
@@ -1630,8 +1314,12 @@ async function refresh(force) {
     answered.sort((a, b) => (sortKey(b) > sortKey(a) ? 1 : sortKey(b) < sortKey(a) ? -1 : 0));
     historyDesired = answered.map((m) =>
       m.direction === "agent"
-        ? { id: String(m.id), sig: cardSig(m), build: () => card(m) }
-        : { id: String(m.id), sig: sentSig(m, true), build: () => sentCard(m, true) }
+        ? { id: String(m.id), sig: JSON.stringify(deriveCardView(m, { pendingCounts: pendingCountsFor(m.id) })), build: () => card(m) }
+        : {
+            id: String(m.id),
+            sig: JSON.stringify(deriveSentView(m, true, { pendingCounts: pendingCountsFor(m.id) })),
+            build: () => sentCard(m, true),
+          }
     );
   }
 
@@ -1658,14 +1346,31 @@ async function refresh(force) {
 
   for (const s of COLUMN_STATES) {
     const container = document.getElementById(`cards-${s}`);
-    const desired = byState[s].map((m) => ({ id: String(m.id), sig: compactSig(m), build: () => compactCard(m) }));
+    const toDesired = (m) => {
+      const blockedInfo = { blockedBy: activeBlockers(m, live), pendingCounts: pendingCountsFor(m.id) };
+      return { id: String(m.id), sig: JSON.stringify(deriveCompactView(m, blockedInfo)), build: () => compactCard(m, blockedInfo) };
+    };
+    // Répondu subsection: his word is the latest event, the agent hasn't reacted
+    // yet. Split preserves each list's existing order (newest-first, priority,
+    // then — backlog only — taskKind), just partitions it in two.
+    const activeMsgs = byState[s].filter((m) => !awaitingAgent(m));
+    const answeredMsgs = byState[s].filter((m) => awaitingAgent(m));
+    const desired = activeMsgs.map(toDesired);
     reconcileSection(container, desired, drafts);
     container.classList.toggle("empty", desired.length === 0);
-    document.getElementById(`col-${s}`).classList.toggle("empty-col", desired.length === 0);
-    const countText = desired.length > 0 ? String(desired.length) : "";
+    document.getElementById(`col-${s}`).classList.toggle("empty-col", desired.length === 0 && answeredMsgs.length === 0);
+    // The column-count pill and rail count show the TOTAL (active + Répondu) —
+    // the Répondu divider's own count below stays scoped to just that list.
+    const totalCount = desired.length + answeredMsgs.length;
+    const countText = totalCount > 0 ? String(totalCount) : "";
     document.getElementById(`count-${s}`).textContent = countText;
     const railCount = document.getElementById(`railcount-${s}`);
     if (railCount) railCount.textContent = countText;
+
+    const answeredDesired = answeredMsgs.map(toDesired);
+    reconcileSection(document.getElementById(`cards-answered-${s}`), answeredDesired, drafts);
+    document.getElementById(`answered-${s}`).hidden = answeredDesired.length === 0;
+    document.getElementById(`answered-count-${s}`).textContent = answeredDesired.length > 0 ? String(answeredDesired.length) : "";
   }
 
   reconcileSection(document.getElementById("cardsHistory"), historyDesired, drafts);
@@ -1683,7 +1388,9 @@ async function refresh(force) {
       closeOverlay();
     } else {
       const panel = document.getElementById("overlayPanel");
-      if (panel.dataset.sig !== overlaySig(openMsg)) renderOverlayBody(openMsg);
+      const openBlockedBy = activeBlockers(openMsg, live);
+      const openOpts = { blockedBy: openBlockedBy, pendingCounts: pendingCountsFor(openMsg.id) };
+      if (panel.dataset.sig !== JSON.stringify(deriveOverlayView(openMsg, openOpts))) renderOverlayBody(openMsg, openBlockedBy);
     }
   }
 }

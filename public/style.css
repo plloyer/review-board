@@ -75,8 +75,31 @@ button:hover { background: #444; }
 #col-landing .column-count { --accent-bg: #322845; --accent-fg: #c9aef0; }
 #col-closed .column-header { --accent: #77777d; }
 
-.column-cards { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-bottom: 8px; min-height: 0; }
+.column-scroll { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-bottom: 8px; }
+.column-cards { display: flex; flex-direction: column; gap: 8px; }
 .column-cards.empty::after { content: "—"; display: block; text-align: center; padding: 8px 0; color: #55555a; font-size: 12px; }
+
+/* Répondu subsection: his word is the latest event, agent hasn't reacted yet. */
+.column-answered[hidden] { display: none; }
+.answered-divider { display: flex; align-items: center; gap: 8px; margin: 2px 0; }
+.answered-divider-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: #6b6b70; white-space: nowrap; }
+.answered-divider::after { content: ""; flex: 1; height: 1px; background: #2a2a2e; }
+.answered-count { flex-shrink: 0; background: #2a2a2d; color: #8a8a90; border-radius: 10px; padding: 0 7px; font-size: 10px; font-weight: 700; }
+.answered-count:empty { display: none; }
+.ccard .answered-marker { font-size: 11px; color: #8a8a90; flex-shrink: 0; }
+/* Overrides the per-column tinted backgrounds below (same #id + class weight,
+   one extra class), which is why it can't just be `.ccard.repondu`. */
+#col-backlog .ccard.repondu,
+#col-in_progress .ccard.repondu,
+#col-questions .ccard.repondu,
+#col-approbation .ccard.repondu,
+#col-landing .ccard.repondu,
+#col-closed .ccard.repondu {
+  opacity: 0.6;
+  border-style: dashed;
+  border-color: #2e332e;
+  background: #191b19;
+}
 
 /* ---------- Compact card ---------- */
 .ccard { background: #1d1d20; border: 1px solid #33333a; border-radius: 10px; padding: 9px 12px; cursor: pointer; }
@@ -86,6 +109,9 @@ button:hover { background: #444; }
 #col-approbation .ccard { background: #1a1f1a; border-color: #3a5a3a; }
 #col-landing .ccard { background: #1e1a24; border-color: #3a2f4d; }
 #col-closed .ccard { opacity: 0.9; }
+.ccard.blocked { opacity: 0.55; }
+@keyframes rb-flash { 0%, 100% { box-shadow: none; } 30% { box-shadow: 0 0 0 2px #d9a441; } }
+.ccard.flash { animation: rb-flash 1s ease; }
 .ccard-row { display: flex; align-items: center; gap: 8px; }
 .ccard-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 /* The title is the most informative line on the card — give it up to 2 lines
@@ -94,7 +120,12 @@ button:hover { background: #444; }
 .chip { font-size: 10px; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; flex-shrink: 0; }
 .chip-feedback { background: #2b4a2b; color: #9fd49f; }
 .chip-projet { background: #333338; color: #b6b6bc; }
+.chip-change-request { background: #3a2b45; color: #b08fd9; }
 .chip-source { background: #2e3b45; color: #9db8c9; }
+.chip-p1 { background: #4a2323; color: #e08a8a; }
+.chip-p3 { background: #333338; color: #8a8a90; }
+.blocked-badge { font-size: 10px; padding: 1px 6px; border-radius: 4px; background: #3a352b; color: #b0a888; cursor: pointer; }
+.blocked-row { margin-top: 4px; }
 .ccard .mini-thumb { width: 44px; height: 28px; object-fit: cover; border-radius: 4px; flex-shrink: 0; cursor: zoom-in; }
 /* Body text stays neutral even in tinted cards — the accent lives in the dot,
    the column header, and the ❓/✅ glyphs; colored-text-on-colored-background
@@ -248,7 +279,7 @@ header.drag-over { outline: 2px dashed #4a90d9; outline-offset: -2px; }
   .col-rail { display: none !important; }
   .column[hidden] { display: flex !important; }
   .column { padding: 16px 0 8px; }
-  .column-cards { overflow: visible; }
+  .column-scroll { overflow: visible; }
   .column-collapse { display: none; }
   [data-state="questions"] { order: 1; }
   [data-state="approbation"] { order: 2; }

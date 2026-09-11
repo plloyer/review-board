@@ -72,3 +72,177 @@ test("close_issue moves the card to closed without archiving it off the board", 
   assert.equal(still.state, "closed");
   assert.equal(still.thread.at(-1).text, "shipped in build 42");
 });
+
+test("create_task/move_task accept blocked_by and priority; set_blockers/set_priority tools work standalone", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const blocker = store.createTask({ title: "Blocker" });
+
+  const created = await client.callTool({
+    name: "create_task",
+    arguments: { title: "Dependent", blocked_by: [blocker.id], priority: 1 },
+  });
+  const depId = created.content[0].text;
+  const dep = store.list().find((m) => m.id === depId);
+  assert.deepEqual(dep.blockedBy, [blocker.id]);
+  assert.equal(dep.priority, 1);
+
+  const other = store.createTask({ title: "Other" });
+  await client.callTool({ name: "move_task", arguments: { id: other.id, state: "in_progress", blocked_by: [blocker.id], priority: 3 } });
+  const movedOther = store.list().find((m) => m.id === other.id);
+  assert.deepEqual(movedOther.blockedBy, [blocker.id]);
+  assert.equal(movedOther.priority, 3);
+
+  await client.callTool({ name: "set_blockers", arguments: { id: other.id, blocked_by: [] } });
+  assert.deepEqual(store.list().find((m) => m.id === other.id).blockedBy, []);
+
+  await client.callTool({ name: "set_priority", arguments: { id: other.id, priority: 2 } });
+  assert.equal(store.list().find((m) => m.id === other.id).priority, 2);
+});
+
+test("set_blockers rejects a cycle through the MCP tool boundary", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const a = store.createTask({ title: "A" });
+  const b = store.createTask({ title: "B" });
+  await client.callTool({ name: "set_blockers", arguments: { id: a.id, blocked_by: [b.id] } });
+  const res = await client.callTool({ name: "set_blockers", arguments: { id: b.id, blocked_by: [a.id] } });
+  assert.equal(res.isError, true);
+});
+
+test("request_change files a backlog change-request card", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const res = await client.callTool({ name: "request_change", arguments: { title: "Add snooze", details: "defer a card" } });
+  const id = res.content[0].text;
+  const card = store.list().find((m) => m.id === id);
+  assert.equal(card.taskKind, "change-request");
+  assert.equal(card.state, "backlog");
+  assert.equal(card.context, "defer a card");
+});
+
+test("list_messages appends blocked_by and priority suffixes only where applicable", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const blocker = store.createTask({ title: "Blocker" });
+  store.createTask({ title: "Dependent", blockedBy: [blocker.id] });
+  store.setPriority(blocker.id, 1);
+
+  const res = await client.callTool({ name: "list_messages", arguments: {} });
+  const text = res.content[0].text;
+  assert.match(text, /Blocker.* p1/);
+  assert.match(text, /Dependent.*blocked_by: /);
+});
+
+// --- attachment validation ---------------------------------------------------
+
+test("send_message rejects a missing images/videos path, listing them verbatim and creating nothing", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const missingImg = path.join(os.tmpdir(), "review-board-missing-img-does-not-exist.png");
+  const missingVid = path.join(os.tmpdir(), "review-board-missing-vid-does-not-exist.mp4");
+  const res = await client.callTool({
+    name: "send_message",
+    arguments: { messages: [{ title: "Look at this", images: [{ path: missingImg }], videos: [{ path: missingVid }] }] },
+  });
+  assert.equal(res.isError, true);
+  const text = res.content[0].text;
+  assert.ok(text.includes(missingImg), "must list the missing image path verbatim");
+  assert.ok(text.includes(missingVid), "must list the missing video path verbatim");
+  assert.match(text, /POST the bytes first: \/api\/upload/);
+  assert.equal(store.list().length, 0, "nothing must be created when an attachment is unreadable");
+});
+
+test("send_message succeeds when every images/videos path exists on this machine", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const srcDir = fs.mkdtempSync(path.join(os.tmpdir(), "review-board-attach-src-"));
+  const img = path.join(srcDir, "shot.png");
+  fs.writeFileSync(img, "bytes");
+  const res = await client.callTool({
+    name: "send_message",
+    arguments: { messages: [{ title: "Look at this", images: [{ path: img }] }] },
+  });
+  assert.equal(res.isError, undefined);
+  assert.equal(store.list().length, 1);
+});
+
+test("reply_to_message rejects a bare local markdown image path that does not exist, appending no thread entry", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const h1 = store.addHumanMessage("bug report", []);
+  const missing = path.join(os.tmpdir(), "review-board-missing-proof-does-not-exist.png");
+  const res = await client.callTool({
+    name: "reply_to_message",
+    arguments: { id: h1.id, text: `fixed, see ![proof](${missing})`, kind: "done" },
+  });
+  assert.equal(res.isError, true);
+  assert.ok(res.content[0].text.includes(missing));
+  assert.equal((store.list().find((m) => m.id === h1.id).thread || []).length, 0, "no thread entry must be appended on rejection");
+});
+
+test("reply_to_message rejects an /api/image?path= ref that neither exists nor sits under the data dir", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const h1 = store.addHumanMessage("bug report", []);
+  const missing = path.join(os.tmpdir(), "review-board-missing-proof-2-does-not-exist.png");
+  const res = await client.callTool({
+    name: "reply_to_message",
+    arguments: { id: h1.id, text: `fixed: ![proof](/api/image?path=${encodeURIComponent(missing)})`, kind: "done" },
+  });
+  assert.equal(res.isError, true);
+  assert.ok(res.content[0].text.includes(missing));
+});
+
+test("reply_to_message accepts an existing local path, an http(s) URL, and a data-dir path even if not yet on disk", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const h1 = store.addHumanMessage("bug report 1", []);
+  const h2 = store.addHumanMessage("bug report 2", []);
+  const h3 = store.addHumanMessage("bug report 3", []);
+
+  const srcDir = fs.mkdtempSync(path.join(os.tmpdir(), "review-board-reply-proof-"));
+  const realImg = path.join(srcDir, "shot.png");
+  fs.writeFileSync(realImg, "bytes");
+  await client.callTool({ name: "reply_to_message", arguments: { id: h1.id, text: `![proof](${realImg})`, kind: "done" } });
+  await client.callTool({ name: "reply_to_message", arguments: { id: h2.id, text: "![proof](https://example.com/shot.png)", kind: "done" } });
+  const underData = path.join(store.DATA_DIR, "uploads", "not-yet-on-disk.png");
+  await client.callTool({
+    name: "reply_to_message",
+    arguments: { id: h3.id, text: `![proof](/api/image?path=${encodeURIComponent(underData)})`, kind: "done" },
+  });
+
+  assert.equal(store.list().find((m) => m.id === h1.id).state, "approbation");
+  assert.equal(store.list().find((m) => m.id === h2.id).state, "approbation");
+  assert.equal(store.list().find((m) => m.id === h3.id).state, "approbation");
+});
+
+// --- list_messages blocked_by -------------------------------------------------
+
+test("list_messages blocked_by suffix lists only ACTIVE blockers, matching the UI", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const resolvedBlocker = store.createTask({ title: "Resolved blocker" });
+  const activeBlocker = store.createTask({ title: "Active blocker" });
+  store.moveTask(resolvedBlocker.id, "closed");
+  const dependent = store.createTask({ title: "Dependent", blockedBy: [resolvedBlocker.id, activeBlocker.id] });
+
+  const res = await client.callTool({ name: "list_messages", arguments: {} });
+  const depLine = res.content[0].text.split("\n").find((l) => l.startsWith(`[${dependent.id}]`));
+  assert.ok(depLine.includes(`blocked_by: ${activeBlocker.id}`), "must list the still-active blocker");
+  assert.ok(!depLine.includes(resolvedBlocker.id), "must not list a landed/closed blocker");
+});
+
+test("recent_history also finds a live (never-archived) delivered item", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const a1 = store.addAgentMessage({ title: "Review this" });
+  store.reply(a1.id, { text: "ok" }); // -> in_progress, still deliverable
+  store.peekDeliverable(); // stamps lastDeliveredAt; card stays live (ack keeps it around)
+  store.acknowledge([a1.id]); // read, but not retired (active state)
+  assert.ok(store.list().some((m) => m.id === a1.id), "card stays live after ack");
+
+  const res = await client.callTool({ name: "recent_history", arguments: { minutes: 30 } });
+  const text = res.content.map((b) => b.text).join("\n");
+  assert.match(text, /Review this/);
+});

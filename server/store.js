@@ -2,17 +2,25 @@
 const fs = require("fs");
 const path = require("path");
 const { EventEmitter } = require("events");
+const { TASK_STATES, KIND_TO_STATE, stateAfterReply, stateAfterAgentReply, isBlocked } = require("../shared/lifecycle");
 
 // ponytail: flat JSON file + in-memory array, single local user, no DB needed.
 const DATA_DIR = process.env.REVIEW_BOARD_DATA_DIR || path.join(__dirname, "..", "data");
 const DATA_FILE = path.join(DATA_DIR, "messages.json");
 
-// Kanban states a task/card moves through. Agent-initiated r-cards (review/question/note)
-// and human-filed cards (feedback + agent-created project tasks) all carry one of these.
-const TASK_STATES = ["backlog", "in_progress", "questions", "approbation", "landing", "closed"];
-// A note is a progress update, not a question — it must never land in the
-// "questions" column (PL: a question card has to actually contain a question).
-const KIND_TO_STATE = { question: "questions", review: "approbation", note: "in_progress" };
+// Path comparisons are case-insensitive on win32 (the filesystem is), case-sensitive elsewhere.
+function normalizeForCompare(resolved) {
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
+
+// True when an already-resolved path sits inside DATA_DIR — a path there was
+// necessarily produced by /api/upload or ingestFile, so it's trusted without
+// needing a separate "is this actually referenced" check. Shared by web.js's
+// /api/image disclosure gate and mcp.js's attachment validation.
+function isUnderDataDir(resolved) {
+  const rel = path.relative(normalizeForCompare(path.resolve(DATA_DIR)), normalizeForCompare(resolved));
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
 
 // One-time migration for messages saved before `state` existed. Human replyTo messages
 // are thread-reply delivery vehicles, never rendered as their own card, so they're left
@@ -39,11 +47,12 @@ function load() {
   try {
     raw = fs.readFileSync(DATA_FILE, "utf8");
   } catch {
-    return { nextAgentId: 1, nextHumanId: 1, messages: [], history: [] };
+    return { nextAgentId: 1, nextHumanId: 1, messages: [], history: [], pendingUnblockNotices: [] };
   }
   try {
     const s = JSON.parse(raw);
     if (!s.history) s.history = []; // back-compat with files written before history existed
+    if (!s.pendingUnblockNotices) s.pendingUnblockNotices = []; // back-compat, ditto
     return migrateStates(s);
   } catch (err) {
     // File exists but is corrupt (e.g. killed mid-write) — never silently drop it.
@@ -54,7 +63,7 @@ function load() {
       console.error(`review-board: failed to back up corrupt ${DATA_FILE}:`, copyErr);
     }
     console.error(`review-board: ${DATA_FILE} is corrupt, backed up to ${backup} and starting fresh:`, err);
-    return { nextAgentId: 1, nextHumanId: 1, messages: [], history: [] };
+    return { nextAgentId: 1, nextHumanId: 1, messages: [], history: [], pendingUnblockNotices: [] };
   }
 }
 
@@ -150,12 +159,77 @@ function addHumanMessage(text, images, replyTo) {
   return msg;
 }
 
+const PRIORITIES = [1, 2, 3];
+
+function validatePriority(priority) {
+  if (priority !== undefined && !PRIORITIES.includes(priority)) throw new Error(`Invalid priority ${priority}`);
+}
+
+// DFS over the blockedBy graph (id -> its blocker ids) looking for a path that
+// leads back to startId — used to reject a blockedBy assignment that would
+// create a cycle. Returns the cycle as an array of ids (startId ... startId),
+// or null.
+function findBlockerCycle(startId, blockedByMap) {
+  function walk(node, path) {
+    for (const next of blockedByMap.get(node) || []) {
+      if (next === startId) return [...path, next];
+      if (path.includes(next)) continue;
+      const found = walk(next, [...path, next]);
+      if (found) return found;
+    }
+    return null;
+  }
+  return walk(startId, [startId]);
+}
+
+// Validates a blockedBy assignment (every id must exist as a live message, no
+// self-reference, no cycle through the existing graph) and returns it — shared
+// by setBlockers, createTask and moveTask so the rule lives in one place.
+function assignBlockers(id, ids) {
+  for (const bid of ids) {
+    if (bid === id) throw new Error(`${id} cannot block itself`);
+    if (!state.messages.some((m) => m.id === bid)) throw new Error(`No message ${bid}`);
+  }
+  const blockedByMap = new Map(state.messages.map((m) => [m.id, m.blockedBy || []]));
+  blockedByMap.set(id, ids);
+  const cycle = findBlockerCycle(id, blockedByMap);
+  if (cycle) throw new Error(`Setting blockers for ${id} would create a cycle: ${cycle.join(" -> ")}`);
+  return ids;
+}
+
+// Replaces a card's blockers (empty list = unblock). Validated, saved, emitted.
+function setBlockers(id, ids) {
+  const msg = state.messages.find((m) => m.id === id);
+  if (!msg) throw new Error(`No message ${id}`);
+  msg.blockedBy = assignBlockers(id, ids);
+  // Re-blocking a card makes any earlier "you're unblocked" notice for it
+  // stale/misleading — drop it. (A card that's still unblocked keeps its
+  // pending notice untouched.)
+  if (isBlocked(msg, state.messages)) {
+    state.pendingUnblockNotices = state.pendingUnblockNotices.filter((n) => n.id !== id);
+  }
+  save(state);
+  emitChange();
+  return msg;
+}
+
+function setPriority(id, priority) {
+  const msg = state.messages.find((m) => m.id === id);
+  if (!msg) throw new Error(`No message ${id}`);
+  validatePriority(priority);
+  msg.priority = priority;
+  save(state);
+  emitChange();
+  return msg;
+}
+
 // A project task the agent files for itself. Reuses the human-message shape
 // (direction "human") purely so the existing thread/seen/archive machinery
 // (agentReply, humanThreadNote, markThreadSeen, archive) works on it unmodified;
 // `createdBy` marks the origin and `taskKind` tells it apart from filed feedback.
-function createTask({ title, context, project }) {
+function createTask({ title, context, project, blockedBy, priority }) {
   const id = `u${state.nextHumanId++}`;
+  validatePriority(priority);
   const msg = {
     id,
     direction: "human",
@@ -172,6 +246,35 @@ function createTask({ title, context, project }) {
     status: "open",
     createdAt: new Date().toISOString(),
   };
+  if (blockedBy && blockedBy.length) msg.blockedBy = assignBlockers(id, blockedBy);
+  if (priority !== undefined) msg.priority = priority;
+  state.messages.push(msg);
+  save(state);
+  emitChange();
+  return msg;
+}
+
+// A change request an agent files about the board itself, filed as a plain
+// human-shaped card so it rides the same thread/seen/archive machinery as any
+// other card — never built by the agent, only proposed for the human to action.
+function createChangeRequest({ title, details }) {
+  const id = `u${state.nextHumanId++}`;
+  const msg = {
+    id,
+    direction: "human",
+    kind: "message",
+    title,
+    context: details || "",
+    project: "",
+    images: [],
+    replyTo: null,
+    createdBy: "agent",
+    taskKind: "change-request",
+    state: "backlog",
+    thread: [],
+    status: "open",
+    createdAt: new Date().toISOString(),
+  };
   state.messages.push(msg);
   save(state);
   emitChange();
@@ -179,12 +282,30 @@ function createTask({ title, context, project }) {
 }
 
 // Moves a task/card to a new kanban state, optionally dropping a thread note
-// (same shape agentReply appends). Works on any card id, human or agent-created.
-function moveTask(id, newState, note) {
+// (same shape agentReply appends) and/or replacing its blockers/priority. Works
+// on any card id, human or agent-created.
+function moveTask(id, newState, note, opts = {}) {
+  const { blockedBy, priority } = opts;
   if (!TASK_STATES.includes(newState)) throw new Error(`Unknown state ${newState}`);
   const msg = state.messages.find((m) => m.id === id);
   if (!msg) throw new Error(`No message ${id}`);
+  validatePriority(priority);
+
+  // Snapshot dependents' blocked status BEFORE this card's state changes, so an
+  // entry into landing/closed can be told apart from a no-op re-move.
+  const dependents = state.messages.filter((m) => (m.blockedBy || []).includes(id));
+  const wasBlocked = new Map(dependents.map((d) => [d.id, isBlocked(d, state.messages)]));
+
   msg.state = newState;
+  // Re-ask: an agent card the human already answered, sent back to "questions"
+  // for another round. Without this, `status` stays "answered" and the badge/
+  // notifier (main.js, keyed off direction=agent + status=open) never fires
+  // again — the card would sit there needing a fresh answer with no visible sign.
+  if (newState === "questions" && msg.direction === "agent" && msg.status === "answered") {
+    msg.status = "open";
+    delete msg.acknowledgedAt;
+    delete msg.readAt;
+  }
   // Closing must also stop redelivery, same as acknowledge() — a card can be closed
   // without ever having gone through await_replies/acknowledge first.
   if (newState === "closed") {
@@ -193,9 +314,29 @@ function moveTask(id, newState, note) {
     if (!msg.readAt) msg.readAt = now;
   }
   if (note) msg.thread = [...(msg.thread || []), { from: "agent", text: note, kind: "update", at: new Date().toISOString() }];
+  if (blockedBy !== undefined) msg.blockedBy = assignBlockers(id, blockedBy);
+  if (priority !== undefined) msg.priority = priority;
+
+  if (newState === "landing" || newState === "closed") queueUnblockNotices(dependents, wasBlocked);
+
   save(state);
   emitChange();
   return msg;
+}
+
+// A blocker landing/closing — or simply disappearing (withdrawn/archived) —
+// can fully clear a dependent's blocked state; queue a one-shot notice for
+// each dependent that just crossed that line. Shared by every path that can
+// change a card's active-blocker status: moveTask (incl. close_issue) and
+// reply() gate the call on the new state reaching landing/closed; withdraw()
+// and archive() call it unconditionally since removing a card unblocks
+// regardless of what state it was in.
+function queueUnblockNotices(dependents, wasBlocked) {
+  for (const dep of dependents) {
+    if (!wasBlocked.get(dep.id) || isBlocked(dep, state.messages)) continue;
+    if (state.pendingUnblockNotices.some((n) => n.id === dep.id)) continue;
+    state.pendingUnblockNotices.push({ id: dep.id, at: new Date().toISOString() });
+  }
 }
 
 function setSummary(id, text) {
@@ -211,14 +352,10 @@ function reply(id, { text, optionChosen, images, decision }) {
   const msg = state.messages.find((m) => m.id === id);
   if (!msg) throw new Error(`No message ${id}`);
   if (msg.direction !== "agent") throw new Error(`Message ${id} is not an agent message`);
+  const dependents = state.messages.filter((m) => (m.blockedBy || []).includes(id));
+  const wasBlocked = new Map(dependents.map((d) => [d.id, isBlocked(d, state.messages)]));
   msg.status = "answered";
-  // Approved → landing (visible until the fix reaches the human's build);
-  // anything else = another iteration → back to in_progress. Never backward out of
-  // closed/landing — a card that already shipped or is on its way stays put; the
-  // reply/status are still recorded.
-  if (msg.state !== "closed" && msg.state !== "landing") {
-    msg.state = decision === "approved" ? "landing" : "in_progress";
-  }
+  msg.state = stateAfterReply(msg.state, decision);
   msg.reply = {
     text: text || "",
     optionChosen: optionChosen || null,
@@ -226,6 +363,7 @@ function reply(id, { text, optionChosen, images, decision }) {
     decision: decision || null,
     at: new Date().toISOString(),
   };
+  if (msg.state === "landing" || msg.state === "closed") queueUnblockNotices(dependents, wasBlocked);
   save(state);
   emitChange();
   return msg;
@@ -240,12 +378,24 @@ function list() {
 // (stamped with lastDeliveredAt) until the agent explicitly calls acknowledge().
 function peekDeliverable() {
   const deliverable = state.messages.filter(isDeliverable);
-  if (deliverable.length === 0) return [];
-  const lastDeliveredAt = new Date().toISOString();
-  for (const m of deliverable) m.lastDeliveredAt = lastDeliveredAt;
-  save(state);
-  emitChange();
-  return deliverable;
+  const deliverableIds = new Set(deliverable.map((m) => m.id));
+  // Unblock notices ride alongside the normal deliverable items — synthetic,
+  // never stamped (no lastDeliveredAt of their own), so they keep coming back
+  // on every call until acknowledge_messages(cardId) removes them. A card
+  // that's independently deliverable this round already carries the real
+  // content — the notice would just be a redundant, duplicate-id entry; the
+  // real delivery supersedes it (acknowledging the card's own id prunes the
+  // notice too, same as always).
+  const notices = state.pendingUnblockNotices
+    .filter((n) => !deliverableIds.has(n.id))
+    .map((n) => ({ id: n.id, unblockNotice: true }));
+  if (deliverable.length > 0) {
+    const lastDeliveredAt = new Date().toISOString();
+    for (const m of deliverable) m.lastDeliveredAt = lastDeliveredAt;
+    save(state);
+    emitChange();
+  }
+  return [...deliverable, ...notices];
 }
 
 function isDeliverable(m) {
@@ -261,8 +411,14 @@ function history() {
 
 function withdraw(ids) {
   const idSet = new Set(ids);
+  // A withdrawn id can itself be someone's blocker (freeing dependents) and/or
+  // carry its own pending unblock notice (now moot — it's leaving the board).
+  const dependents = state.messages.filter((m) => !idSet.has(m.id) && (m.blockedBy || []).some((b) => idSet.has(b)));
+  const wasBlocked = new Map(dependents.map((d) => [d.id, isBlocked(d, state.messages)]));
   const before = state.messages.length;
   state.messages = state.messages.filter((m) => !idSet.has(m.id));
+  state.pendingUnblockNotices = state.pendingUnblockNotices.filter((n) => !idSet.has(n.id));
+  queueUnblockNotices(dependents, wasBlocked);
   save(state);
   emitChange();
   return before - state.messages.length;
@@ -278,7 +434,10 @@ function withdraw(ids) {
 function acknowledge(ids) {
   const idSet = new Set(ids);
   const acked = state.messages.filter((m) => idSet.has(m.id) && isDeliverable(m));
-  if (acked.length === 0) return 0;
+  const noticesBefore = state.pendingUnblockNotices.length;
+  state.pendingUnblockNotices = state.pendingUnblockNotices.filter((n) => !idSet.has(n.id));
+  const noticesRemoved = noticesBefore - state.pendingUnblockNotices.length;
+  if (acked.length === 0 && noticesRemoved === 0) return 0;
   const now = new Date().toISOString();
   // A replyTo human message is a thread reply's delivery vehicle — it has no card on
   // the board, so once acknowledged it retires to history like a closed agent card.
@@ -296,16 +455,23 @@ function acknowledge(ids) {
   }
   save(state);
   emitChange();
-  return acked.length;
+  return acked.length + noticesRemoved;
 }
 
 // Agent tells the human an issue they filed is resolved, without removing the card —
-// the human archives it themselves once satisfied.
+// the human archives it themselves once satisfied. Also applies the kind's kanban
+// transition (question -> questions, done -> approbation, update -> no move) so
+// callers (mcp.js) don't have to — the transition policy lives here, once.
 function agentReply(id, text, kind = "update") {
   const msg = state.messages.find((m) => m.id === id);
   if (!msg) throw new Error(`No message ${id}`);
   if (msg.direction !== "human") throw new Error(`Message ${id} is not a human message`);
   msg.thread = [...(msg.thread || []), { from: "agent", text, kind, at: new Date().toISOString() }];
+  const next = stateAfterAgentReply(kind);
+  // Never backward out of closed/landing, same as stateAfterReply's guard — a
+  // card that already shipped or is on its way stays put; the reply itself is
+  // still recorded above.
+  if (next && msg.state !== "closed" && msg.state !== "landing") msg.state = next;
   save(state);
   emitChange();
   return msg;
@@ -340,7 +506,13 @@ function markThreadSeen(id) {
 function archive(id) {
   const msg = state.messages.find((m) => m.id === id);
   if (!msg) throw new Error(`No message ${id}`);
+  // Same as withdraw(): archiving an active blocker can free its dependents;
+  // archiving a card cancels its own now-moot pending notice, if any.
+  const dependents = state.messages.filter((m) => m.id !== id && (m.blockedBy || []).includes(id));
+  const wasBlocked = new Map(dependents.map((d) => [d.id, isBlocked(d, state.messages)]));
   state.messages = state.messages.filter((m) => m.id !== id);
+  state.pendingUnblockNotices = state.pendingUnblockNotices.filter((n) => n.id !== id);
+  queueUnblockNotices(dependents, wasBlocked);
   const now = new Date().toISOString();
   // deliveredAt means "an agent actually received this" — only true if it was ever
   // peeked. A message dismissed before that only gets archivedAt.
@@ -354,11 +526,15 @@ function archive(id) {
 
 module.exports = {
   DATA_DIR,
+  isUnderDataDir,
   TASK_STATES,
   addAgentMessage,
   addHumanMessage,
   createTask,
+  createChangeRequest,
   moveTask,
+  setBlockers,
+  setPriority,
   setSummary,
   reply,
   list,

@@ -223,6 +223,17 @@ test("agentReply throws on an unknown id", () => {
   assert.throws(() => store.agentReply("u999", "x"));
 });
 
+test("agentReply applies stateAfterAgentReply itself: question -> questions, done -> approbation, update -> unchanged", () => {
+  const { store } = freshStore();
+  const h1 = store.addHumanMessage("bug report", []); // state: backlog
+  store.agentReply(h1.id, "still on it", "update");
+  assert.equal(store.list().find((m) => m.id === h1.id).state, "backlog", "kind update must not move the card");
+  store.agentReply(h1.id, "which environment?", "question");
+  assert.equal(store.list().find((m) => m.id === h1.id).state, "questions");
+  store.agentReply(h1.id, "fixed, ready for review", "done");
+  assert.equal(store.list().find((m) => m.id === h1.id).state, "approbation");
+});
+
 test("markThreadSeen stamps threadSeenAt", () => {
   const { store } = freshStore();
   const h1 = store.addHumanMessage("bug report", []);
@@ -393,6 +404,57 @@ test("reply() does not move state backward out of closed or landing, but still r
   assert.equal(replied2.state, "landing", "must stay in landing, not bounce");
 });
 
+test("agentReply does not move a card OUT of closed/landing via its automatic kind->state transition, but still appends the thread entry", () => {
+  const { store } = freshStore();
+  const h1 = store.addHumanMessage("bug report", []);
+  store.moveTask(h1.id, "closed");
+  const updated = store.agentReply(h1.id, "one more question", "question");
+  assert.equal(updated.state, "closed", "must not move backward to questions");
+  assert.equal(updated.thread.at(-1).kind, "question");
+
+  const h2 = store.addHumanMessage("another bug", []);
+  store.moveTask(h2.id, "landing");
+  const updated2 = store.agentReply(h2.id, "done again", "done");
+  assert.equal(updated2.state, "landing", "must not move backward to approbation");
+  assert.equal(updated2.thread.at(-1).kind, "done");
+});
+
+test("moveTask re-asking an answered agent card into questions resets it to open (status/acknowledgedAt/readAt cleared) so it becomes actionable again", () => {
+  const { store } = freshStore();
+  const a1 = store.addAgentMessage({ title: "Review this", kind: "review" });
+  store.reply(a1.id, { text: "looks good", decision: "approved" }); // -> landing, status answered
+  store.acknowledge([a1.id]); // agent drains it; acknowledgedAt/readAt stamped
+  const before = store.list().find((m) => m.id === a1.id);
+  assert.equal(before.status, "answered");
+  assert.ok(before.acknowledgedAt);
+
+  const reAsked = store.moveTask(a1.id, "questions");
+  assert.equal(reAsked.status, "open", "re-ask must flip status back to open so the badge/notifier fires again");
+  assert.ok(!reAsked.acknowledgedAt, "acknowledgedAt must be cleared");
+  assert.ok(!reAsked.readAt, "readAt must be cleared");
+  assert.equal(reAsked.state, "questions");
+  assert.deepEqual(store.peekDeliverable().filter((m) => m.id === a1.id), [], "not deliverable to the agent again — nothing new for it to receive");
+});
+
+test("moveTask leaves status/acknowledgedAt alone when the target isn't questions, or the card was never answered", () => {
+  const { store } = freshStore();
+  const a1 = store.addAgentMessage({ title: "Review this", kind: "review" });
+  store.reply(a1.id, { text: "ok", decision: "approved" }); // -> landing
+  store.acknowledge([a1.id]);
+  const moved = store.moveTask(a1.id, "in_progress"); // not "questions"
+  assert.equal(moved.status, "answered", "only a move into questions resets status");
+  assert.ok(moved.acknowledgedAt);
+
+  const a2 = store.addAgentMessage({ title: "Fresh question", kind: "question" }); // already status open
+  const moved2 = store.moveTask(a2.id, "questions");
+  assert.equal(moved2.status, "open");
+
+  const human = store.createTask({ title: "A human-shaped task" });
+  const moved3 = store.moveTask(human.id, "questions"); // direction human, guard must not apply
+  assert.equal(moved3.direction, "human");
+  assert.equal(moved3.status, "open");
+});
+
 test("setSummary sets msg.summary", () => {
   const { store } = freshStore();
   const h1 = store.addHumanMessage("the login button is broken on the settings page", []);
@@ -429,4 +491,217 @@ test("migration assigns state to stateless data loaded from disk: human question
   assert.equal(byId("u4").state, undefined);
   assert.equal(byId("r1").state, "questions");
   assert.equal(byId("r2").state, "approbation");
+});
+
+// --- blocked_by -------------------------------------------------------------
+
+test("setBlockers rejects an unknown blocker id and self-reference", () => {
+  const { store } = freshStore();
+  const a = store.createTask({ title: "A" });
+  assert.throws(() => store.setBlockers(a.id, ["u999"]), /No message/);
+  assert.throws(() => store.setBlockers(a.id, [a.id]), /cannot block itself/);
+});
+
+test("setBlockers rejects a direct cycle (A blocked by B, B blocked by A)", () => {
+  const { store } = freshStore();
+  const a = store.createTask({ title: "A" });
+  const b = store.createTask({ title: "B" });
+  store.setBlockers(a.id, [b.id]);
+  assert.throws(() => store.setBlockers(b.id, [a.id]), /cycle/);
+});
+
+test("setBlockers rejects a chain cycle (A -> B -> C -> A)", () => {
+  const { store } = freshStore();
+  const a = store.createTask({ title: "A" });
+  const b = store.createTask({ title: "B" });
+  const c = store.createTask({ title: "C" });
+  store.setBlockers(b.id, [a.id]);
+  store.setBlockers(c.id, [b.id]);
+  assert.throws(() => store.setBlockers(a.id, [c.id]), /cycle/);
+});
+
+test("setBlockers replaces the list; empty list unblocks", () => {
+  const { store } = freshStore();
+  const a = store.createTask({ title: "A" });
+  const b = store.createTask({ title: "B" });
+  const c = store.createTask({ title: "C" });
+  store.setBlockers(a.id, [b.id, c.id]);
+  assert.deepEqual(store.list().find((m) => m.id === a.id).blockedBy, [b.id, c.id]);
+  store.setBlockers(a.id, []);
+  assert.deepEqual(store.list().find((m) => m.id === a.id).blockedBy, []);
+});
+
+test("createTask and moveTask accept blockedBy", () => {
+  const { store } = freshStore();
+  const b = store.createTask({ title: "B" });
+  const a = store.createTask({ title: "A", blockedBy: [b.id] });
+  assert.deepEqual(a.blockedBy, [b.id]);
+
+  const c = store.createTask({ title: "C" });
+  const moved = store.moveTask(a.id, "in_progress", null, { blockedBy: [b.id, c.id] });
+  assert.deepEqual(moved.blockedBy, [b.id, c.id]);
+});
+
+test("moveTask into landing/closed queues a one-shot unblock notice for a dependent that becomes fully unblocked", () => {
+  const { store } = freshStore();
+  const blocker = store.createTask({ title: "Blocker" });
+  const dependent = store.createTask({ title: "Dependent", blockedBy: [blocker.id] });
+  // A fresh task is itself already deliverable (open, unacknowledged); ack it so the
+  // synthetic notice below isn't masked by peekDeliverable's own-content-wins dedup.
+  store.acknowledge([dependent.id]);
+  assert.equal(store.peekDeliverable().some((m) => m.id === dependent.id && m.unblockNotice), false);
+
+  store.moveTask(blocker.id, "closed");
+  const delivered = store.peekDeliverable();
+  const notice = delivered.find((m) => m.id === dependent.id && m.unblockNotice);
+  assert.ok(notice, "unblock notice must be queued once the sole blocker closes");
+
+  // Still there on a second peek (non-destructive) until acknowledged.
+  assert.ok(store.peekDeliverable().some((m) => m.id === dependent.id && m.unblockNotice));
+
+  store.acknowledge([dependent.id]);
+  assert.equal(store.peekDeliverable().some((m) => m.id === dependent.id && m.unblockNotice), false, "acknowledged notice must not redeliver");
+});
+
+test("unblock notice is not queued again on a no-op re-move once already resolved", () => {
+  const { store } = freshStore();
+  const blocker = store.createTask({ title: "Blocker" });
+  const dependent = store.createTask({ title: "Dependent", blockedBy: [blocker.id] });
+  store.moveTask(blocker.id, "closed");
+  store.acknowledge([dependent.id]);
+  store.moveTask(blocker.id, "closed", "re-closed, no-op"); // same state again
+  assert.equal(store.peekDeliverable().some((m) => m.id === dependent.id && m.unblockNotice), false);
+});
+
+test("pendingUnblockNotices survives a save/reload round-trip", () => {
+  const { store, dir } = freshStore();
+  const blocker = store.createTask({ title: "Blocker" });
+  const dependent = store.createTask({ title: "Dependent", blockedBy: [blocker.id] });
+  store.acknowledge([dependent.id]); // see comment above: avoid the own-content dedup masking the notice
+  store.moveTask(blocker.id, "closed");
+
+  delete require.cache[require.resolve("../server/store")];
+  process.env.REVIEW_BOARD_DATA_DIR = dir;
+  const reloaded = require("../server/store");
+  const delivered = reloaded.peekDeliverable();
+  assert.ok(delivered.some((m) => m.unblockNotice));
+});
+
+test("reply() approving a review card also queues unblock notices (landing reached without moveTask)", () => {
+  const { store } = freshStore();
+  const blocker = store.addAgentMessage({ title: "Review this", kind: "review" });
+  const dependent = store.createTask({ title: "Dependent", blockedBy: [blocker.id] });
+  store.acknowledge([dependent.id]); // see comment above: avoid the own-content dedup masking the notice
+  store.reply(blocker.id, { text: "ok", decision: "approved" }); // -> landing
+  assert.ok(store.peekDeliverable().some((m) => m.id === dependent.id && m.unblockNotice));
+});
+
+// --- unblock notice integrity (withdraw/archive/setBlockers/peekDeliverable) --
+
+test("withdraw of an active blocker queues an unblock notice for its now-unblocked dependent", () => {
+  const { store } = freshStore();
+  const blocker = store.createTask({ title: "Blocker" });
+  const dependent = store.createTask({ title: "Dependent", blockedBy: [blocker.id] });
+  // A fresh task is itself already deliverable (open, unacknowledged); ack it so the
+  // synthetic notice below isn't masked by peekDeliverable's own-content-wins dedup.
+  store.acknowledge([dependent.id]);
+  store.withdraw([blocker.id]);
+  assert.ok(store.peekDeliverable().some((m) => m.id === dependent.id && m.unblockNotice));
+});
+
+test("archive of an active blocker queues an unblock notice for its now-unblocked dependent", () => {
+  const { store } = freshStore();
+  const blocker = store.createTask({ title: "Blocker" });
+  const dependent = store.createTask({ title: "Dependent", blockedBy: [blocker.id] });
+  store.acknowledge([dependent.id]); // see comment above
+  store.archive(blocker.id);
+  assert.ok(store.peekDeliverable().some((m) => m.id === dependent.id && m.unblockNotice));
+});
+
+test("withdraw of a dependent prunes its own now-moot pending unblock notice", () => {
+  const { store } = freshStore();
+  const blocker = store.createTask({ title: "Blocker" });
+  const dependent = store.createTask({ title: "Dependent", blockedBy: [blocker.id] });
+  store.acknowledge([dependent.id]); // see comment above
+  store.moveTask(blocker.id, "closed"); // queues a notice for dependent
+  assert.ok(store.peekDeliverable().some((m) => m.id === dependent.id && m.unblockNotice));
+  store.withdraw([dependent.id]);
+  assert.equal(store.peekDeliverable().some((m) => m.id === dependent.id && m.unblockNotice), false);
+});
+
+test("archive of a dependent prunes its own now-moot pending unblock notice", () => {
+  const { store } = freshStore();
+  const blocker = store.createTask({ title: "Blocker" });
+  const dependent = store.createTask({ title: "Dependent", blockedBy: [blocker.id] });
+  store.acknowledge([dependent.id]); // see comment above
+  store.moveTask(blocker.id, "closed");
+  assert.ok(store.peekDeliverable().some((m) => m.id === dependent.id && m.unblockNotice));
+  store.archive(dependent.id);
+  assert.equal(store.peekDeliverable().some((m) => m.id === dependent.id && m.unblockNotice), false);
+});
+
+test("setBlockers re-blocking a card prunes its stale pending unblock notice", () => {
+  const { store } = freshStore();
+  const blocker = store.createTask({ title: "Blocker" });
+  const dependent = store.createTask({ title: "Dependent", blockedBy: [blocker.id] });
+  store.acknowledge([dependent.id]); // see comment above
+  store.moveTask(blocker.id, "closed"); // queues a notice for dependent
+  assert.ok(store.peekDeliverable().some((m) => m.id === dependent.id && m.unblockNotice));
+  const newBlocker = store.createTask({ title: "New blocker" });
+  store.setBlockers(dependent.id, [newBlocker.id]); // blocked again
+  assert.equal(store.peekDeliverable().some((m) => m.id === dependent.id && m.unblockNotice), false);
+});
+
+test("setBlockers unblocking (empty list) leaves an existing pending unblock notice alone — it's still accurate", () => {
+  const { store } = freshStore();
+  const blocker = store.createTask({ title: "Blocker" });
+  const dependent = store.createTask({ title: "Dependent", blockedBy: [blocker.id] });
+  store.acknowledge([dependent.id]); // see comment above
+  store.moveTask(blocker.id, "closed");
+  assert.ok(store.peekDeliverable().some((m) => m.id === dependent.id && m.unblockNotice));
+  store.setBlockers(dependent.id, []); // still not blocked
+  assert.ok(store.peekDeliverable().some((m) => m.id === dependent.id && m.unblockNotice));
+});
+
+test("peekDeliverable drops a pending unblock notice when that same id is independently deliverable (no duplicate ids in one batch)", () => {
+  const { store } = freshStore();
+  const blocker = store.addAgentMessage({ title: "Review this", kind: "review" });
+  const dependent = store.addHumanMessage("dependent feedback", []); // open/deliverable on its own
+  store.setBlockers(dependent.id, [blocker.id]);
+  store.reply(blocker.id, { text: "ok", decision: "approved" }); // -> landing, queues a notice for dependent
+
+  const delivered = store.peekDeliverable();
+  const dependentEntries = delivered.filter((m) => m.id === dependent.id);
+  assert.equal(dependentEntries.length, 1, "must appear exactly once, not duplicated as content + notice");
+  assert.equal(dependentEntries[0].unblockNotice, undefined, "the real deliverable content wins over the synthetic notice");
+});
+
+// --- priority ----------------------------------------------------------------
+
+test("setPriority sets/validates priority", () => {
+  const { store } = freshStore();
+  const a = store.createTask({ title: "A" });
+  store.setPriority(a.id, 1);
+  assert.equal(store.list().find((m) => m.id === a.id).priority, 1);
+  assert.throws(() => store.setPriority(a.id, 4));
+});
+
+test("createTask/moveTask accept priority", () => {
+  const { store } = freshStore();
+  const a = store.createTask({ title: "A", priority: 1 });
+  assert.equal(a.priority, 1);
+  const moved = store.moveTask(a.id, "in_progress", null, { priority: 3 });
+  assert.equal(moved.priority, 3);
+  assert.throws(() => store.createTask({ title: "B", priority: 9 }));
+});
+
+// --- request_change -----------------------------------------------------------
+
+test("createChangeRequest files a backlog card with taskKind change-request and context = details", () => {
+  const { store } = freshStore();
+  const cr = store.createChangeRequest({ title: "Add a snooze button", details: "so I can defer a card" });
+  assert.equal(cr.direction, "human");
+  assert.equal(cr.taskKind, "change-request");
+  assert.equal(cr.state, "backlog");
+  assert.equal(cr.context, "so I can defer a card");
 });

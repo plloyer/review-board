@@ -7,17 +7,13 @@ const { buildServer } = require("./mcp");
 const store = require("./store");
 const push = require("./push");
 const { summarizeTitle } = require("./summarize");
+const { extractPathRefs } = require("../shared/lifecycle");
 
 const BUILD_ID = String(Date.now());
 
 // Path comparisons are case-insensitive on win32 (the filesystem is), case-sensitive elsewhere.
 function normalizeForCompare(resolved) {
   return process.platform === "win32" ? resolved.toLowerCase() : resolved;
-}
-
-function isUnderDataDir(resolved) {
-  const rel = path.relative(normalizeForCompare(path.resolve(store.DATA_DIR)), normalizeForCompare(resolved));
-  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
 
 // /api/image discloses only files under our own data dir or actually referenced by a
@@ -29,20 +25,7 @@ function referencedImagePaths() {
   // a bare local path or already wrapped in /api/image?path=<encoded> — both count
   // as referenced.
   const addMarkdownTargets = (text) => {
-    const s = String(text || "");
-    // Any /api/image?path=<encoded> reference, whatever markup carries it
-    // (markdown image, raw <img>/<video> tag).
-    for (const m of s.matchAll(/\/api\/image\?path=([^"'&)\s]+)/g)) {
-      try {
-        add(decodeURIComponent(m[1]));
-      } catch {}
-    }
-    // Markdown images with a bare local path target.
-    for (const m of s.matchAll(/!\[[^\]]*\]\(([^)\s]+)\)/g)) {
-      const target = m[1];
-      if (/^(https?:|data:|\/api\/image)/i.test(target)) continue;
-      add(target);
-    }
+    for (const p of extractPathRefs(text)) add(p);
   };
   const collect = (m) => {
     for (const img of m.images || []) add(img.path);
@@ -62,6 +45,7 @@ function createApp({ clipboard } = {}) {
   // 4K screenshots pasted as base64 dataURLs easily pass 20 MB — keep headroom.
   web.use(express.json({ limit: "100mb" }));
   web.use(express.static(path.join(__dirname, "..", "public")));
+  web.use("/shared", express.static(path.join(__dirname, "..", "shared")));
 
   // Stateless: one McpServer per request, no session to leak or lose messages across.
   const mcpHandler = async (req, res) => {
@@ -171,7 +155,7 @@ function createApp({ clipboard } = {}) {
     if (typeof p !== "string") return res.status(404).end();
     const resolved = path.resolve(p);
     if (!fs.existsSync(resolved)) return res.status(404).end();
-    if (!isUnderDataDir(resolved) && !referencedImagePaths().has(normalizeForCompare(resolved))) {
+    if (!store.isUnderDataDir(resolved) && !referencedImagePaths().has(normalizeForCompare(resolved))) {
       return res.status(404).end();
     }
     res.sendFile(resolved);

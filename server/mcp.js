@@ -4,6 +4,7 @@ const path = require("path");
 const { McpServer } = require("@modelcontextprotocol/sdk/server/mcp.js");
 const { z } = require("zod");
 const store = require("./store");
+const { activeBlockers, extractPathRefs } = require("../shared/lifecycle");
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -49,6 +50,10 @@ function pushImages(blocks, images) {
 function formatDelivered(items) {
   const blocks = [];
   for (const m of items) {
+    if (m.unblockNotice) {
+      blocks.push({ type: "text", text: `[${m.id}] débloquée : ses bloqueurs sont fermés` });
+      continue;
+    }
     if (m.direction === "human") {
       blocks.push({ type: "text", text: `[${m.id}] the human sent you a message: ${m.title}` });
       pushImages(blocks, m.images);
@@ -62,6 +67,40 @@ function formatDelivered(items) {
   return blocks;
 }
 
+// Shared by every tool that can set a card's priority (1 = highest, 3 = lowest,
+// absent = normal/2).
+const PRIORITY_SCHEMA = z.union([z.literal(1), z.literal(2), z.literal(3)]).optional();
+
+// Attachment validation (live incident: a path unreadable on the board machine
+// renders as a broken image/video there, with no signal back to the agent).
+// Checked at the MCP tool boundary, before anything is created/replied — the
+// store layer itself stays permissive (addAgentMessage keeps a remote-machine
+// path verbatim, which is correct for the file itself, just not for a client
+// that never uploaded the bytes first).
+function attachmentErrorText(missing) {
+  return (
+    `Not readable on this machine: ${missing.join(", ")}\n` +
+    "These paths are not readable on the board machine. POST the bytes first: /api/upload {dataUrl, filename} -> {path}, then attach that path."
+  );
+}
+
+function missingLocalPaths(messages) {
+  const missing = [];
+  for (const m of messages) {
+    for (const img of m.images || []) if (!fs.existsSync(img.path)) missing.push(img.path);
+    for (const vid of m.videos || []) if (!fs.existsSync(vid.path)) missing.push(vid.path);
+  }
+  return missing;
+}
+
+// Same check for a markdown image/video ref embedded in reply text (e.g. proof
+// screenshots): a bare local path or an /api/image?path= target must either
+// exist here or already sit under our own data dir — an http(s)/data: URL
+// never reaches this list (extractPathRefs skips those).
+function missingTextRefs(text) {
+  return extractPathRefs(text).filter((p) => !fs.existsSync(p) && !store.isUnderDataDir(path.resolve(p)));
+}
+
 function buildServer() {
   // The workflow travels with the MCP handshake so every client learns it without
   // needing the repo's WORKFLOW.md (kept in sync with that file, condensed).
@@ -69,10 +108,13 @@ function buildServer() {
     "Review-board workflow. States: backlog -> in_progress -> questions -> approbation -> landing -> closed.",
     "Loop: await_replies (at-least-once: acknowledge_messages after reading, or items redeliver; ack = READ, never fixed).",
     "Pick work: the human's feedback backlog cards outrank projet tasks. File your own tasks with create_task.",
+    "Dependencies: set_blockers / blocked_by on create_task/move_task (blocked until blockers reach landing/closed; you get a \"débloquée\" delivery). Priority: set_priority / priority 1-3 (1 first).",
     "Start a card: move_task in_progress. Blocked on the human: reply_to_message kind question (auto-moves to questions). Progress notes: kind update (silent).",
     "Done with real proof (markdown images ![p](/api/image?path=<enc>)): reply_to_message kind done (auto-moves to approbation).",
+    "Proof files must be readable by the BOARD's machine. Running elsewhere? First POST the bytes: /api/upload {dataUrl, filename} -> {path}, then reference THAT path. A path from your own disk renders as a broken image on his board.",
     "He approves -> merge -> move_task landing. Fix present in the build he runs -> close_issue. Never closed before it is in his build; never close what he has not approved.",
     "He refuses -> the card returns to in_progress; iterate.",
+    "Board bug or missing tool? request_change — never patch the board yourself.",
   ].join("\n");
 
   const server = new McpServer(
@@ -103,6 +145,8 @@ function buildServer() {
       },
     },
     async ({ messages }) => {
+      const missing = missingLocalPaths(messages);
+      if (missing.length) return { isError: true, content: [{ type: "text", text: attachmentErrorText(missing) }] };
       const created = messages.map((m) => store.addAgentMessage(m));
       return { content: [{ type: "text", text: created.map((m) => m.id).join(", ") }] };
     }
@@ -147,7 +191,17 @@ function buildServer() {
       inputSchema: {},
     },
     async () => {
-      const rows = store.list().map((m) => `[${m.id}] ${m.direction}/${m.kind}/${m.status}/${m.state || "-"}: ${m.title}`);
+      const live = store.list();
+      const rows = live.map((m) => {
+        let row = `[${m.id}] ${m.direction}/${m.kind}/${m.status}/${m.state || "-"}: ${m.title}`;
+        if (m.priority === 1 || m.priority === 3) row += ` p${m.priority}`;
+        // Only the still-active blockers, matching what the board itself shows
+        // (a landed/closed blocker no longer counts, even if still listed in
+        // blockedBy).
+        const active = activeBlockers(m, live);
+        if (active.length) row += ` blocked_by: ${active.join(",")}`;
+        return row;
+      });
       return { content: [{ type: "text", text: rows.length ? rows.join("\n") : "Queue is empty" }] };
     }
   );
@@ -156,17 +210,28 @@ function buildServer() {
     "recent_history",
     {
       description:
-        "Re-fetch the full content (text + images) of everything delivered by await_replies in the last N minutes. Use this if a previous await_replies call seems to have dropped its response (e.g. after a timeout or error) — the human's message isn't lost, it's already in history; this hands it back to you.",
+        "Re-fetch the full content (text + images) of everything delivered by await_replies in the last N minutes. Use this if a previous await_replies call seems to have dropped its response (e.g. after a timeout or error) — the human's message isn't lost, it's already in history; this hands it back to you. Replays everything delivered to ANY client in the window.",
       inputSchema: { minutes: z.number().min(1).max(1440).default(30) },
     },
     async ({ minutes }) => {
       const cutoff = Date.now() - minutes * 60 * 1000;
-      const recent = store.history().filter((m) => {
+      const fromHistory = store.history().filter((m) => {
         // A message the human dismissed without an agent ever having received it
         // (archivedAt but no lastDeliveredAt) must not surface here as if it were live.
         if (m.archivedAt && !m.lastDeliveredAt) return false;
         return m.deliveredAt && new Date(m.deliveredAt).getTime() >= cutoff;
       });
+      // A delivered item stays on the live board now that ack keeps cards around
+      // (only archive/withdraw removes them) — scan store.list() too, or a card
+      // still sitting in its column would look like it was never delivered.
+      const fromLive = store.list().filter((m) => m.lastDeliveredAt && new Date(m.lastDeliveredAt).getTime() >= cutoff);
+      const seen = new Set();
+      const recent = [];
+      for (const m of [...fromHistory, ...fromLive]) {
+        if (seen.has(m.id)) continue;
+        seen.add(m.id);
+        recent.push(m);
+      }
       if (recent.length === 0) return { content: [{ type: "text", text: "Nothing delivered in that window" }] };
       return { content: formatDelivered(recent) };
     }
@@ -201,7 +266,7 @@ function buildServer() {
     "reply_to_message",
     {
       description:
-        "Reply under the human's message/issue on their board (e.g. \"fixed in <sha>\"). This is how you tell the human an issue they filed is resolved — acknowledge_messages only marks it read, it no longer removes it from their board. Kind 'question' also moves the card to state questions; kind 'done' moves it to approbation. When the human has approved AND the fix is delivered, finish with close_issue.",
+        "Reply under the human's message/issue on their board (e.g. \"fixed in <sha>\"). This is how you tell the human an issue they filed is resolved — acknowledge_messages only marks it read, it no longer removes it from their board. Kind 'question' also moves the card to state questions; kind 'done' moves it to approbation. Embedded proof images must use a path readable by the board's machine — from another machine, POST /api/upload {dataUrl, filename} first and reference the returned path. When the human has approved AND the fix is delivered, finish with close_issue.",
       inputSchema: {
         id: z.string(),
         text: z.string(),
@@ -214,9 +279,9 @@ function buildServer() {
       },
     },
     async ({ id, text, kind }) => {
+      const missing = missingTextRefs(text);
+      if (missing.length) return { isError: true, content: [{ type: "text", text: attachmentErrorText(missing) }] };
       store.agentReply(id, text, kind);
-      if (kind === "question") store.moveTask(id, "questions");
-      else if (kind === "done") store.moveTask(id, "approbation");
       return { content: [{ type: "text", text: `Replied to ${id}` }] };
     }
   );
@@ -246,10 +311,12 @@ function buildServer() {
         title: z.string(),
         context: z.string().optional(),
         project: z.string().optional(),
+        blocked_by: z.array(z.string()).optional().describe("Ids of cards that must land/close before this one is unblocked."),
+        priority: PRIORITY_SCHEMA,
       },
     },
-    async ({ title, context, project }) => {
-      const msg = store.createTask({ title, context, project });
+    async ({ title, context, project, blocked_by, priority }) => {
+      const msg = store.createTask({ title, context, project, blockedBy: blocked_by, priority });
       return { content: [{ type: "text", text: msg.id }] };
     }
   );
@@ -263,11 +330,59 @@ function buildServer() {
         id: z.string(),
         state: z.enum(store.TASK_STATES),
         note: z.string().optional(),
+        blocked_by: z.array(z.string()).optional().describe("Replaces this card's blockers (ids); empty list unblocks."),
+        priority: PRIORITY_SCHEMA,
       },
     },
-    async ({ id, state, note }) => {
-      store.moveTask(id, state, note);
+    async ({ id, state, note, blocked_by, priority }) => {
+      store.moveTask(id, state, note, { blockedBy: blocked_by, priority });
       return { content: [{ type: "text", text: `Moved ${id} to ${state}` }] };
+    }
+  );
+
+  server.registerTool(
+    "set_blockers",
+    {
+      description: "Replace a card's blockers; empty list unblocks; a card is blocked while any blocker is not landing/closed.",
+      inputSchema: {
+        id: z.string(),
+        blocked_by: z.array(z.string()),
+      },
+    },
+    async ({ id, blocked_by }) => {
+      store.setBlockers(id, blocked_by);
+      return { content: [{ type: "text", text: `Set blockers for ${id}: [${blocked_by.join(", ")}]` }] };
+    }
+  );
+
+  server.registerTool(
+    "set_priority",
+    {
+      description: "Set a card's priority: 1 (highest) to 3 (lowest); absent/2 is normal.",
+      inputSchema: {
+        id: z.string(),
+        priority: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+      },
+    },
+    async ({ id, priority }) => {
+      store.setPriority(id, priority);
+      return { content: [{ type: "text", text: `Set priority for ${id}: ${priority}` }] };
+    }
+  );
+
+  server.registerTool(
+    "request_change",
+    {
+      description:
+        "File a change request about the review board itself (new tool, workflow change, bug in the board). It needs the human's validation before anyone builds it — do not implement board changes yourself.",
+      inputSchema: {
+        title: z.string(),
+        details: z.string().optional(),
+      },
+    },
+    async ({ title, details }) => {
+      const msg = store.createChangeRequest({ title, details });
+      return { content: [{ type: "text", text: msg.id }] };
     }
   );
 
