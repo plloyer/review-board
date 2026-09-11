@@ -63,7 +63,22 @@ function formatDelivered(items) {
 }
 
 function buildServer() {
-  const server = new McpServer({ name: "review-board", version: "1.0.0" }, { capabilities: { logging: {} } });
+  // The workflow travels with the MCP handshake so every client learns it without
+  // needing the repo's WORKFLOW.md (kept in sync with that file, condensed).
+  const WORKFLOW_INSTRUCTIONS = [
+    "Review-board workflow. States: backlog -> in_progress -> questions -> approbation -> landing -> closed.",
+    "Loop: await_replies (at-least-once: acknowledge_messages after reading, or items redeliver; ack = READ, never fixed).",
+    "Pick work: the human's feedback backlog cards outrank projet tasks. File your own tasks with create_task.",
+    "Start a card: move_task in_progress. Blocked on the human: reply_to_message kind question (auto-moves to questions). Progress notes: kind update (silent).",
+    "Done with real proof (markdown images ![p](/api/image?path=<enc>)): reply_to_message kind done (auto-moves to approbation).",
+    "He approves -> merge -> move_task landing. Fix present in the build he runs -> close_issue. Never closed before it is in his build; never close what he has not approved.",
+    "He refuses -> the card returns to in_progress; iterate.",
+  ].join("\n");
+
+  const server = new McpServer(
+    { name: "review-board", version: "1.0.0" },
+    { capabilities: { logging: {} }, instructions: WORKFLOW_INSTRUCTIONS }
+  );
 
   server.registerTool(
     "send_message",
