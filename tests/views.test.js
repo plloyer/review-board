@@ -213,11 +213,12 @@ test("deriveCompactView: a human-direction awaiting card marks '✓ Approuvé' o
 });
 
 test("deriveCompactView: an awaiting card never gets a cancel button, even when it would otherwise read as undelivered", () => {
+  // in_progress, not backlog: a backlog card is never awaitingAgent by rule.
   const msg = {
     id: "u2",
     direction: "human",
     status: "open",
-    state: "backlog",
+    state: "in_progress",
     title: "T",
     thread: [{ from: "human", text: "hi", at: "2026-01-01T00:00:00.000Z" }],
   };

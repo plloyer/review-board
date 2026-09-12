@@ -126,6 +126,21 @@ test("awaitingAgent (human-direction): true only while his own thread entry is t
   );
 });
 
+test("awaitingAgent: a backlog card is never awaiting, whatever its thread or status", () => {
+  // Backlog is pull-based — no agent has picked the card up yet, so the human
+  // enriching it is not "waiting on the AI"; it stays an ordinary backlog card.
+  assert.equal(
+    Lifecycle.awaitingAgent({ direction: "human", state: "backlog", thread: [{ from: "human", text: "plus d'infos" }] }),
+    false
+  );
+  assert.equal(Lifecycle.awaitingAgent({ direction: "agent", state: "backlog", status: "answered" }), false);
+  // The same shapes outside backlog keep the existing behavior.
+  assert.equal(
+    Lifecycle.awaitingAgent({ direction: "human", state: "in_progress", thread: [{ from: "human", text: "plus d'infos" }] }),
+    true
+  );
+});
+
 test("activeBlockers: returns only the still-active blocker ids", () => {
   const all = [
     { id: "u1", blockedBy: ["u2", "u3", "ghost"] },

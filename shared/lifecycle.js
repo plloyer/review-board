@@ -134,6 +134,9 @@ function extractPathRefs(text) {
 // flips it back; a card with no thread yet is never awaitingAgent, it's just
 // an ordinary active card.
 function awaitingAgent(msg) {
+  // Backlog is pull-based: no agent has picked the card up yet, so enriching it
+  // is not "waiting on the AI" — it stays an ordinary backlog card until pickup.
+  if (msg.state === "backlog") return false;
   if (msg.direction === "agent") return msg.status === "answered" && !msg.acknowledgedAt;
   const last = lastThreadEntry(msg);
   return Boolean(last) && last.from === "human";
