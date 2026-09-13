@@ -234,8 +234,10 @@ test("deriveCompactView: an awaiting card never gets a cancel button, even when 
   assert.equal(view.cancelBtn, "");
 });
 
-test("deriveCompactView: a closed+awaitingAgent card still offers Testé ✓ Archiver; other awaiting states keep no action at all", () => {
-  const closedAwaiting = {
+test("deriveCompactView: a closed card with a human tail is an ordinary closed card and keeps Testé ✓ Archiver; awaiting states keep no action at all", () => {
+  // A closed card is never awaitingAgent (the agent's reaction to the approval
+  // WAS the close) — but the human's archive action must survive regardless.
+  const closedHumanTail = {
     id: "u11",
     direction: "human",
     status: "open",
@@ -243,12 +245,13 @@ test("deriveCompactView: a closed+awaitingAgent card still offers Testé ✓ Arc
     title: "T",
     thread: [{ from: "human", text: "ok", at: "2026-01-01T00:00:00.000Z" }],
   };
-  const view = Views.deriveCompactView(closedAwaiting);
-  assert.equal(view.awaitingAgent, true);
+  const view = Views.deriveCompactView(closedHumanTail);
+  assert.equal(view.awaitingAgent, false);
   assert.match(view.actionsHTML, /archive-link-btn/);
   assert.match(view.actionsHTML, /Testé ✓ Archiver/);
 
-  const inProgressAwaiting = { ...closedAwaiting, id: "u12", state: "in_progress" };
+  const inProgressAwaiting = { ...closedHumanTail, id: "u12", state: "in_progress" };
+  assert.equal(Views.deriveCompactView(inProgressAwaiting).awaitingAgent, true);
   assert.equal(Views.deriveCompactView(inProgressAwaiting).actionsHTML, "");
 });
 

@@ -216,6 +216,16 @@ test("agentMoveNeedsApproval: a human-direction card approved via thread note ma
   assert.equal(Lifecycle.agentMoveNeedsApproval(msg, "closed"), false);
 });
 
+test("awaitingAgent: a closed card is never awaiting — the agent's reaction to an approval was the close itself", () => {
+  // close_issue leaves no thread entry, so the human's "Approuvé" stays the tail;
+  // on a closed card the next move is his (retest, archive), never the agent's.
+  assert.equal(
+    Lifecycle.awaitingAgent({ direction: "human", state: "closed", thread: [{ from: "human", text: "Approuvé ✅" }] }),
+    false
+  );
+  assert.equal(Lifecycle.awaitingAgent({ direction: "agent", state: "closed", status: "answered" }), false);
+});
+
 test("activeBlockers: returns only the still-active blocker ids", () => {
   const all = [
     { id: "u1", blockedBy: ["u2", "u3", "ghost"] },

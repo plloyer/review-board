@@ -174,6 +174,10 @@ function awaitingAgent(msg) {
   // Backlog is pull-based: no agent has picked the card up yet, so enriching it
   // is not "waiting on the AI" — it stays an ordinary backlog card until pickup.
   if (msg.state === "backlog") return false;
+  // Closed is terminal for the agent: its reaction to the human's approval was
+  // the close itself (which writes no thread entry), and the next move — retest,
+  // archive — is the human's. A closed card never reads "waiting on the AI".
+  if (msg.state === "closed") return false;
   if (msg.direction === "agent") return msg.status === "answered" && !msg.acknowledgedAt;
   const last = lastThreadEntry(msg);
   return Boolean(last) && last.from === "human";
