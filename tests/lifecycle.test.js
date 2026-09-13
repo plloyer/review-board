@@ -69,6 +69,32 @@ test("stateAfterAgentReply: question -> questions, done -> approbation, update -
   assert.equal(Lifecycle.stateAfterAgentReply("update"), null);
 });
 
+// --- agentMoveNeedsApproval (agent bypass gate) -----------------------------
+
+test("agentMoveNeedsApproval: blocks a move to landing/closed by default", () => {
+  assert.equal(Lifecycle.agentMoveNeedsApproval({}, "landing"), true);
+  assert.equal(Lifecycle.agentMoveNeedsApproval({}, "closed"), true);
+});
+
+test("agentMoveNeedsApproval: never blocks any other target state", () => {
+  for (const state of ["backlog", "in_progress", "questions", "approbation"]) {
+    assert.equal(Lifecycle.agentMoveNeedsApproval({}, state), false);
+  }
+});
+
+test("agentMoveNeedsApproval: a noReview card is exempt, even with no reply at all", () => {
+  assert.equal(Lifecycle.agentMoveNeedsApproval({ noReview: true }, "landing"), false);
+  assert.equal(Lifecycle.agentMoveNeedsApproval({ noReview: true }, "closed"), false);
+});
+
+test("agentMoveNeedsApproval: an approved reply exempts it; any other decision (or none) still blocks", () => {
+  // direction "agent": only agent-direction cards ever carry a reply field.
+  assert.equal(Lifecycle.agentMoveNeedsApproval({ direction: "agent", reply: { decision: "approved" } }, "landing"), false);
+  assert.equal(Lifecycle.agentMoveNeedsApproval({ direction: "agent", reply: { decision: "approved" } }, "closed"), false);
+  assert.equal(Lifecycle.agentMoveNeedsApproval({ direction: "agent", reply: { decision: "iteration" } }, "landing"), true);
+  assert.equal(Lifecycle.agentMoveNeedsApproval({ direction: "agent", reply: {} }, "landing"), true);
+});
+
 // --- blockedBy -------------------------------------------------------------
 
 test("isBlocked: false when blockedBy is absent/empty", () => {
@@ -139,6 +165,46 @@ test("awaitingAgent: a backlog card is never awaiting, whatever its thread or st
     Lifecycle.awaitingAgent({ direction: "human", state: "in_progress", thread: [{ from: "human", text: "plus d'infos" }] }),
     true
   );
+});
+
+test("approvedByHuman: agent-direction reads the recorded reply decision", () => {
+  assert.equal(Lifecycle.approvedByHuman({ direction: "agent", reply: { decision: "approved" } }), true);
+  assert.equal(Lifecycle.approvedByHuman({ direction: "agent", reply: { decision: "commented" } }), false);
+  assert.equal(Lifecycle.approvedByHuman({ direction: "agent" }), false);
+});
+
+test("approvedByHuman: human-direction reads the LATEST HUMAN thread entry, so an agent update never cancels an approval but a later human comment does", () => {
+  const approved = { direction: "human", thread: [{ from: "human", text: "Approuvé ✅" }] };
+  assert.equal(Lifecycle.approvedByHuman(approved), true);
+  const agentAfter = {
+    direction: "human",
+    thread: [
+      { from: "human", text: "Approuvé ✅" },
+      { from: "agent", text: "merging now", kind: "update" },
+    ],
+  };
+  assert.equal(Lifecycle.approvedByHuman(agentAfter), true);
+  const humanAfter = {
+    direction: "human",
+    thread: [
+      { from: "human", text: "Approuvé" },
+      { from: "human", text: "finalement à corriger: le menu clignote" },
+    ],
+  };
+  assert.equal(Lifecycle.approvedByHuman(humanAfter), false);
+  assert.equal(Lifecycle.approvedByHuman({ direction: "human", thread: [] }), false);
+});
+
+test("agentMoveNeedsApproval: a human-direction card approved via thread note may land", () => {
+  const msg = {
+    direction: "human",
+    thread: [
+      { from: "agent", text: "done, see proof", kind: "done" },
+      { from: "human", text: "Approuvé ✅" },
+    ],
+  };
+  assert.equal(Lifecycle.agentMoveNeedsApproval(msg, "landing"), false);
+  assert.equal(Lifecycle.agentMoveNeedsApproval(msg, "closed"), false);
 });
 
 test("activeBlockers: returns only the still-active blocker ids", () => {

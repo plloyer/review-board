@@ -62,15 +62,41 @@ test("reply_to_message kind question/done move the card; kind update does not", 
   assert.equal(store.list().find((m) => m.id === h1.id).state, "approbation", "kind update must not move the card");
 });
 
-test("close_issue moves the card to closed without archiving it off the board", async () => {
+test("close_issue moves an APPROVED card to closed without archiving it off the board", async () => {
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
   const h1 = store.addHumanMessage("bug report", []);
+  store.humanThreadNote(h1.id, "Approuvé ✅");
   await client.callTool({ name: "close_issue", arguments: { id: h1.id, note: "shipped in build 42" } });
   const still = store.list().find((m) => m.id === h1.id);
   assert.ok(still, "close_issue must not remove the card — the human archives it himself");
   assert.equal(still.state, "closed");
   assert.equal(still.thread.at(-1).text, "shipped in build 42");
+});
+
+test("close_issue refuses an unapproved card — same gate as move_task", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const h1 = store.addHumanMessage("bug report", []);
+  const res = await client.callTool({ name: "close_issue", arguments: { id: h1.id } });
+  assert.equal(res.isError, true);
+  assert.match(res.content[0].text, /approval/);
+  assert.notEqual(store.list().find((m) => m.id === h1.id).state, "closed");
+});
+
+test("the approved human-direction workflow lands: create_task -> done -> Approuvé -> move_task landing", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  await client.callTool({ name: "create_task", arguments: { title: "wire the menu", context: "c" } });
+  const task = store.list().find((m) => m.title === "wire the menu");
+  await client.callTool({ name: "move_task", arguments: { id: task.id, state: "in_progress" } });
+  store.agentReply(task.id, "done, proof attached", "done");
+  store.humanThreadNote(task.id, "Approuvé ✅");
+  // An agent progress note after the approval must not cancel it.
+  store.agentReply(task.id, "merging", "update");
+  const res = await client.callTool({ name: "move_task", arguments: { id: task.id, state: "landing" } });
+  assert.notEqual(res.isError, true, res.content?.[0]?.text);
+  assert.equal(store.list().find((m) => m.id === task.id).state, "landing");
 });
 
 test("create_task/move_task accept blocked_by and priority; set_blockers/set_priority tools work standalone", async () => {
@@ -108,6 +134,41 @@ test("set_blockers rejects a cycle through the MCP tool boundary", async () => {
   await client.callTool({ name: "set_blockers", arguments: { id: a.id, blocked_by: [b.id] } });
   const res = await client.callTool({ name: "set_blockers", arguments: { id: b.id, blocked_by: [a.id] } });
   assert.equal(res.isError, true);
+});
+
+test("create_task with no_review roundtrips onto the card, visible via list_messages like any other task", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const res = await client.callTool({ name: "create_task", arguments: { title: "Trivial task", no_review: true } });
+  const id = res.content[0].text;
+  assert.equal(store.list().find((m) => m.id === id).noReview, true);
+  const listed = await client.callTool({ name: "list_messages", arguments: {} });
+  assert.match(listed.content[0].text, new RegExp(`\\[${id}\\].*Trivial task`));
+});
+
+test("move_task to landing on a normal in_progress card returns the instructive error and leaves it in place", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const task = store.createTask({ title: "Do the thing" });
+  await client.callTool({ name: "move_task", arguments: { id: task.id, state: "in_progress" } });
+
+  const res = await client.callTool({ name: "move_task", arguments: { id: task.id, state: "landing" } });
+  assert.equal(res.isError, true);
+  assert.match(res.content[0].text, /reply_to_message/);
+  assert.match(res.content[0].text, /no_review/);
+  assert.equal(store.list().find((m) => m.id === task.id).state, "in_progress", "refused move must leave state untouched");
+});
+
+test("move_task to landing succeeds for a no_review card", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const created = await client.callTool({ name: "create_task", arguments: { title: "Trivial task", no_review: true } });
+  const id = created.content[0].text;
+  await client.callTool({ name: "move_task", arguments: { id, state: "in_progress" } });
+
+  const res = await client.callTool({ name: "move_task", arguments: { id, state: "landing" } });
+  assert.equal(res.isError, undefined);
+  assert.equal(store.list().find((m) => m.id === id).state, "landing");
 });
 
 test("request_change files a backlog change-request card", async () => {

@@ -706,6 +706,70 @@ test("createChangeRequest files a backlog card with taskKind change-request and 
   assert.equal(cr.context, "so I can defer a card");
 });
 
+// --- agent-move approval gate (agentMoveNeedsApproval) -----------------------
+
+test("moveTask(actor 'agent') refuses landing/closed on a normal card, with an instructive error, leaving state untouched", () => {
+  const { store } = freshStore();
+  const task = store.createTask({ title: "Do the thing" });
+  store.moveTask(task.id, "in_progress");
+  assert.throws(
+    () => store.moveTask(task.id, "landing", null, { actor: "agent" }),
+    /reply_to_message.*done.*no_review/s
+  );
+  assert.equal(store.list().find((m) => m.id === task.id).state, "in_progress", "refused move must leave state untouched");
+});
+
+test("moveTask(actor 'agent') to a non-landing/closed state is never gated", () => {
+  const { store } = freshStore();
+  const task = store.createTask({ title: "Do the thing" });
+  const moved = store.moveTask(task.id, "in_progress", null, { actor: "agent" });
+  assert.equal(moved.state, "in_progress");
+});
+
+test("moveTask default actor ('human', e.g. the web route) is never gated", () => {
+  const { store } = freshStore();
+  const task = store.createTask({ title: "Do the thing" });
+  const moved = store.moveTask(task.id, "landing");
+  assert.equal(moved.state, "landing");
+});
+
+test("moveTask(actor 'agent') succeeds once the card carries an approved reply", () => {
+  const { store } = freshStore();
+  const a1 = store.addAgentMessage({ title: "Review this", kind: "review" }); // -> approbation
+  store.reply(a1.id, { text: "ok", decision: "approved" }); // -> landing
+  const closed = store.moveTask(a1.id, "closed", null, { actor: "agent" });
+  assert.equal(closed.state, "closed");
+});
+
+test("moveTask(actor 'agent') succeeds for a task created no_review, with no reply at all", () => {
+  const { store } = freshStore();
+  const task = store.createTask({ title: "Trivial task", noReview: true });
+  store.moveTask(task.id, "in_progress");
+  const moved = store.moveTask(task.id, "landing", null, { actor: "agent" });
+  assert.equal(moved.state, "landing");
+});
+
+test("moveTask(actor 'agent') refused move fires no unblock notices for dependents", () => {
+  const { store } = freshStore();
+  const blocker = store.createTask({ title: "Blocker" });
+  const dependent = store.createTask({ title: "Dependent", blockedBy: [blocker.id] });
+  store.acknowledge([dependent.id]);
+  assert.throws(() => store.moveTask(blocker.id, "landing", null, { actor: "agent" }));
+  assert.equal(
+    store.peekDeliverable().some((m) => m.id === dependent.id && m.unblockNotice),
+    false,
+    "a refused move must not unblock dependents"
+  );
+});
+
+test("createTask accepts noReview and stores it on the card", () => {
+  const { store } = freshStore();
+  const task = store.createTask({ title: "Trivial", noReview: true });
+  assert.equal(task.noReview, true);
+  const other = store.createTask({ title: "Normal" });
+  assert.equal(other.noReview, undefined);
+});
+
 test("humanThreadNote on a questions-state card moves it back to in_progress (his answer unblocks it)", () => {
   const { store } = freshStore();
   const h = store.addHumanMessage("issue", []);

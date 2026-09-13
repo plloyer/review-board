@@ -117,6 +117,7 @@ function buildServer() {
     "Dependencies: set_blockers / blocked_by on create_task/move_task (blocked until blockers reach landing/closed; you get a \"débloquée\" delivery). Priority: set_priority / priority 1-3 (1 first).",
     "Start a card: move_task in_progress. Blocked on the human: reply_to_message kind question (auto-moves to questions). Progress notes: kind update (silent).",
     "Done with real proof (markdown images ![p](/api/image?path=<enc>)): reply_to_message kind done (auto-moves to approbation).",
+    "Moving to landing/closed requires the human's approval unless the task was created no_review (create_task no_review: true).",
     "Proof files must be readable by the BOARD's machine. Running elsewhere? First POST the bytes: /api/upload {dataUrl, filename} -> {path}, then reference THAT path. A path from your own disk renders as a broken image on his board.",
     "He approves -> merge -> move_task landing. Fix present in the build he runs -> close_issue. Never closed before it is in his build; never close what he has not approved.",
     "He refuses -> the card returns to in_progress; iterate.",
@@ -296,14 +297,16 @@ function buildServer() {
     "close_issue",
     {
       description:
-        "Mark a task as present in the human's current build (state closed). He retests it there and archives it himself — this does NOT remove the card from his board. Never close before the fix is actually delivered in his build. Optional note: a final line recorded in the thread.",
+        "Mark a task as present in the human's current build (state closed). He retests it there and archives it himself — this does NOT remove the card from his board. Never close before the fix is actually delivered in his build. Requires his approval on the card first, unless it was created with no_review. Optional note: a final line recorded in the thread.",
       inputSchema: {
         id: z.string(),
         note: z.string().optional(),
       },
     },
     async ({ id, note }) => {
-      store.moveTask(id, "closed", note);
+      // Same gate as move_task — closed is the other road past approbation, and
+      // an ungated close_issue would make the move_task gate pointless.
+      store.moveTask(id, "closed", note, { actor: "agent" });
       return { content: [{ type: "text", text: `Closed ${id}` }] };
     }
   );
@@ -319,10 +322,14 @@ function buildServer() {
         project: z.string().optional(),
         blocked_by: z.array(z.string()).optional().describe("Ids of cards that must land/close before this one is unblocked."),
         priority: PRIORITY_SCHEMA,
+        no_review: z
+          .boolean()
+          .optional()
+          .describe("Marks a task that will not need the human's approval to land/close — it still shows on the board like any other."),
       },
     },
-    async ({ title, context, project, blocked_by, priority }) => {
-      const msg = store.createTask({ title, context, project, blockedBy: blocked_by, priority });
+    async ({ title, context, project, blocked_by, priority, no_review }) => {
+      const msg = store.createTask({ title, context, project, blockedBy: blocked_by, priority, noReview: no_review });
       return { content: [{ type: "text", text: msg.id }] };
     }
   );
@@ -331,7 +338,7 @@ function buildServer() {
     "move_task",
     {
       description:
-        "Move a task through the board: backlog -> in_progress (you started) -> questions (you need the human — prefer asking via reply_to_message kind question, which moves it automatically) -> approbation (done, proof attached, awaiting his approval) -> landing (approved AND merged) -> closed (present in the build he runs). Optional note lands in the thread.",
+        "Move a task through the board: backlog -> in_progress (you started) -> questions (you need the human — prefer asking via reply_to_message kind question, which moves it automatically) -> approbation (done, proof attached, awaiting his approval) -> landing (approved AND merged) -> closed (present in the build he runs). Moving to landing/closed requires the human's approval unless the task was created no_review. Optional note lands in the thread.",
       inputSchema: {
         id: z.string(),
         state: z.enum(store.TASK_STATES),
@@ -341,7 +348,7 @@ function buildServer() {
       },
     },
     async ({ id, state, note, blocked_by, priority }) => {
-      store.moveTask(id, state, note, { blockedBy: blocked_by, priority });
+      store.moveTask(id, state, note, { blockedBy: blocked_by, priority, actor: "agent" });
       return { content: [{ type: "text", text: `Moved ${id} to ${state}` }] };
     }
   );

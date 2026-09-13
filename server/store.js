@@ -2,7 +2,7 @@
 const fs = require("fs");
 const path = require("path");
 const { EventEmitter } = require("events");
-const { TASK_STATES, KIND_TO_STATE, stateAfterReply, stateAfterAgentReply, isBlocked } = require("../shared/lifecycle");
+const { TASK_STATES, KIND_TO_STATE, stateAfterReply, stateAfterAgentReply, isBlocked, agentMoveNeedsApproval } = require("../shared/lifecycle");
 
 // ponytail: flat JSON file + in-memory array, single local user, no DB needed.
 const DATA_DIR = process.env.REVIEW_BOARD_DATA_DIR || path.join(__dirname, "..", "data");
@@ -227,7 +227,7 @@ function setPriority(id, priority) {
 // (direction "human") purely so the existing thread/seen/archive machinery
 // (agentReply, humanThreadNote, markThreadSeen, archive) works on it unmodified;
 // `createdBy` marks the origin and `taskKind` tells it apart from filed feedback.
-function createTask({ title, context, project, blockedBy, priority }) {
+function createTask({ title, context, project, blockedBy, priority, noReview }) {
   const id = `u${state.nextHumanId++}`;
   validatePriority(priority);
   const msg = {
@@ -248,6 +248,9 @@ function createTask({ title, context, project, blockedBy, priority }) {
   };
   if (blockedBy && blockedBy.length) msg.blockedBy = assignBlockers(id, blockedBy);
   if (priority !== undefined) msg.priority = priority;
+  // Opt-out, at creation: some tasks legitimately never need his review before
+  // landing/closing (see agentMoveNeedsApproval) — still an ordinary visible card.
+  if (noReview) msg.noReview = true;
   state.messages.push(msg);
   save(state);
   emitChange();
@@ -285,11 +288,21 @@ function createChangeRequest({ title, details }) {
 // (same shape agentReply appends) and/or replacing its blockers/priority. Works
 // on any card id, human or agent-created.
 function moveTask(id, newState, note, opts = {}) {
-  const { blockedBy, priority } = opts;
+  const { blockedBy, priority, actor = "human" } = opts;
   if (!TASK_STATES.includes(newState)) throw new Error(`Unknown state ${newState}`);
   const msg = state.messages.find((m) => m.id === id);
   if (!msg) throw new Error(`No message ${id}`);
   validatePriority(priority);
+
+  // The bypass this gate exists to close: an agent moving straight to landing/
+  // closed, skipping the human's approbation review. Only actor "agent" is
+  // gated — the web route (human dragging a card) never passes actor, so it
+  // stays unrestricted. Thrown before any mutation below.
+  if (actor === "agent" && agentMoveNeedsApproval(msg, newState)) {
+    throw new Error(
+      `${id} needs the human's approval before moving to ${newState}: deliver with reply_to_message kind "done" and wait for the human's approval, or the task must have been created with no_review.`
+    );
+  }
 
   // Snapshot dependents' blocked status BEFORE this card's state changes, so an
   // entry into landing/closed can be told apart from a no-op re-move.

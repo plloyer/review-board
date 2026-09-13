@@ -234,10 +234,10 @@ function awaitingHumanWord(msg) {
 
 // The tail reads as an approval either via the recorded reply's decision, or
 // (human-direction, no such field) by the comment text itself being EXACTLY an
-// approval — matches the approve-in-place flow's own wording ("Approuvé ✅")
-// but not a longer comment that merely starts with "Approuvé" (that's a real
-// comment, marked "✓ toi" like any other).
-const APPROVAL_TEXT_RE = /^approuv[ée]?\s*[!.✅]*$/i;
+// approval. The regex lives in lifecycle.js (shared with the agent move gate);
+// this stays tail-based on purpose — the marker describes the LAST entry, while
+// the gate's approvedByHuman reads the latest HUMAN entry.
+const APPROVAL_TEXT_RE = LocalLifecycle.APPROVAL_TEXT_RE;
 function awaitingApproved(msg) {
   if (msg.direction === "agent") return (msg.reply || {}).decision === "approved";
   return APPROVAL_TEXT_RE.test(String((lastThreadEntry(msg) || {}).text || "").trim());
@@ -251,6 +251,13 @@ const TASK_KIND_CHIP_LABEL = { "change-request": "MCR" };
 function priorityChipHTML(priority) {
   if (priority !== 1 && priority !== 3) return ""; // nothing shown for p2/absent
   return `<span class="chip chip-p${priority}">p${priority}</span>`;
+}
+
+// Discreet marker for a task created no_review (see shared/lifecycle.js's
+// agentMoveNeedsApproval) — visible on the board, not hidden away.
+function noReviewChipHTML(noReview) {
+  if (!noReview) return "";
+  return `<span class="chip chip-no-review">sans revue</span>`;
 }
 
 // One badge per blocker (finding: list/navigate ALL blockers, not just the
@@ -303,6 +310,7 @@ function messageFingerprint(msg, extra = {}) {
     msg.status,
     msg.priority,
     msg.taskKind,
+    msg.noReview,
     msg.blockedBy || null,
     msg.summary,
     msg.title,
@@ -360,6 +368,7 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
         ? `<span class="chip chip-${msg.taskKind}">${esc(TASK_KIND_CHIP_LABEL[msg.taskKind] || msg.taskKind)}</span>`
         : "";
     const priorityChip = priorityChipHTML(msg.priority);
+    const noReviewChip = noReviewChipHTML(msg.noReview);
     const undelivered = msg.direction === "human" && !msg.replyTo && !msg.lastDeliveredAt && !msg.acknowledgedAt;
     const cancelBtn = undelivered ? `<button class="cancel-sent" title="Annuler">×</button>` : "";
 
@@ -374,6 +383,7 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
         dot: core.dot,
         chip,
         priorityChip,
+        noReviewChip,
         sourceChip: core.sourceChip,
         title: core.shortTitle,
         miniThumb: core.miniThumbHTML,
@@ -427,6 +437,7 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
       dot: core.dot,
       chip,
       priorityChip,
+      noReviewChip,
       sourceChip: core.sourceChip,
       title: core.shortTitle,
       miniThumb: core.miniThumbHTML,

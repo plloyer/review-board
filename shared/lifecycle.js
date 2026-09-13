@@ -85,6 +85,39 @@ function stateAfterAgentReply(kind) {
   return null;
 }
 
+// A comment that IS an approval — exactly the approve-in-place flow's wording
+// ("Approuvé ✅"), not a longer comment that merely starts with "Approuvé".
+// Shared with views.js's tail marker so the two readings can never drift.
+const APPROVAL_TEXT_RE = /^approuv[ée]?\s*[!.✅]*$/i;
+
+// Has the human approved this card? Agent-direction cards record it as
+// reply.decision (store.reply). Human-direction cards (feedback, projet tasks)
+// never get a reply field — his approval is a thread note, so read the LATEST
+// HUMAN entry: an agent update posted after his "Approuvé" never cancels it,
+// while a later human comment (a change of mind) does.
+function approvedByHuman(msg) {
+  if (msg.direction === "agent") return (msg.reply || {}).decision === "approved";
+  const thread = msg.thread || [];
+  for (let i = thread.length - 1; i >= 0; i--) {
+    if (thread[i].from === "human") {
+      return APPROVAL_TEXT_RE.test(String(thread[i].text || "").trim());
+    }
+  }
+  return false;
+}
+
+// True when an AGENT-initiated move to landing/closed needs the human's sign-off
+// first — the bypass this predicate exists to close (agents moving cards straight
+// from in_progress to landing, skipping the approbation column). A card created
+// no_review, or one the human approved (approvedByHuman), is exempt. Never gates
+// a human-initiated move (that's the caller's job — see store.moveTask's actor
+// option) and never gates any other target state.
+function agentMoveNeedsApproval(msg, toState) {
+  if (toState !== "landing" && toState !== "closed") return false;
+  if (msg.noReview) return false;
+  return !approvedByHuman(msg);
+}
+
 // The ids in msg.blockedBy that are still active blockers: they exist in `all`
 // (a card list) and aren't in state landing/closed yet. A blockedBy id absent
 // from `all` is not blocking (never found = never blocks).
@@ -154,6 +187,9 @@ const Lifecycle = {
   agentAwaitingDecision,
   stateAfterReply,
   stateAfterAgentReply,
+  APPROVAL_TEXT_RE,
+  approvedByHuman,
+  agentMoveNeedsApproval,
   activeBlockers,
   isBlocked,
   extractPathRefs,

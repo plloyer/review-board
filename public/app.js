@@ -822,6 +822,7 @@ function compactCard(msg, blockedInfo) {
       ${view.dot ? `<span class="ccard-dot" style="background:${view.dot}"></span>` : ""}
       ${view.chip}
       ${view.priorityChip}
+      ${view.noReviewChip}
       <span class="ccard-title">${view.title}</span>
       ${view.miniThumb}
       ${view.cancelBtn}

@@ -5,7 +5,7 @@ Six states: `backlog` -> `in_progress` -> `questions` -> `approbation` -> `landi
 ## The loop
 
 1. `await_replies` blocks until something is deliverable (his replies, his new feedback). Delivery is at-least-once: call `acknowledge_messages` after reading, or the same items come back every call. Acknowledge means READ, never fixed.
-2. Pick work: his `feedback` backlog cards always outrank `projet` tasks. File your own project tasks with `create_task` (they land in backlog).
+2. Pick work: his `feedback` backlog cards always outrank `projet` tasks. File your own project tasks with `create_task` (they land in backlog). Pass `no_review: true` for a task that legitimately never needs his review before landing.
 3. Starting a card: `move_task(id, "in_progress")`.
 4. Blocked on him: `reply_to_message(id, kind "question")` — moves the card to `questions` automatically. Routine progress notes use kind `update` (silent, no ping).
 5. Done with proof: `reply_to_message(id, kind "done")` — moves it to `approbation`. Attach proof as markdown images/videos in the text (`![proof](/api/image?path=<encoded local path>)`); real screenshots, never claims. Proof files must be readable by the board machine - from another machine, POST /api/upload {dataUrl, filename} first and use the returned path.
@@ -27,3 +27,4 @@ Dependencies: `set_blockers` / `blocked_by` on `create_task`/`move_task` (blocke
 2. `acknowledge_messages` = read, not fixed. Never skip it (redelivery floods you); never treat it as closing.
 3. Never `closed` before the fix is in the build he runs; never close a card he has not approved.
 4. Board bug or missing tool? `request_change` — never patch the board yourself.
+5. Moving to `landing`/`closed` requires his approval unless the task was created `no_review` — `move_task` refuses otherwise.
