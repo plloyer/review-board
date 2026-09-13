@@ -54,8 +54,9 @@ button:hover { background: #444; }
 .column { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 .column[hidden] { display: none; }
 /* An empty column has nothing to show but its header and the "—" placeholder —
-   let non-empty columns share the freed-up width instead. */
-.column.empty-col { flex: 0 0 120px; }
+   let non-empty columns share the freed-up width instead. When every column is
+   empty they all stretch, so the board still fills its width. */
+#board:has(.column:not(.empty-col):not([hidden])) .column.empty-col { flex: 0 0 120px; }
 .column-header { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .column-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; color: var(--accent, #ecebe8); }
 .column-count { background: var(--accent-bg, #333338); color: var(--accent-fg, #b6b6bc); border-radius: 10px; padding: 0 7px; font-size: 11px; font-weight: 700; }
