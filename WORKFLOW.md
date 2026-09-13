@@ -27,4 +27,4 @@ Dependencies: `set_blockers` / `blocked_by` on `create_task`/`move_task` (blocke
 2. `acknowledge_messages` = read, not fixed. Never skip it (redelivery floods you); never treat it as closing.
 3. Never `closed` before the fix is in the build he runs; never close a card he has not approved.
 4. Board bug or missing tool? `request_change` — never patch the board yourself.
-5. Moving to `landing`/`closed` requires his approval unless the task was created `no_review` — `move_task` refuses otherwise.
+5. Entering `landing`/`closed` requires his approval unless the task was created `no_review` — `move_task`/`close_issue` refuse otherwise. Closing a card already in `landing` is free (the approval was paid at the landing door).

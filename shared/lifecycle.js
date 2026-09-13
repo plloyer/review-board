@@ -114,6 +114,10 @@ function approvedByHuman(msg) {
 // option) and never gates any other target state.
 function agentMoveNeedsApproval(msg, toState) {
   if (toState !== "landing" && toState !== "closed") return false;
+  // The gate charges at the landing door only: a card already in landing was
+  // approved to get there (or predates the gate) — closing it is free, never a
+  // second approval on the same card.
+  if (msg.state === "landing") return false;
   if (msg.noReview) return false;
   return !approvedByHuman(msg);
 }

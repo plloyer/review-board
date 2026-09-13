@@ -117,7 +117,7 @@ function buildServer() {
     "Dependencies: set_blockers / blocked_by on create_task/move_task (blocked until blockers reach landing/closed; you get a \"débloquée\" delivery). Priority: set_priority / priority 1-3 (1 first).",
     "Start a card: move_task in_progress. Blocked on the human: reply_to_message kind question (auto-moves to questions). Progress notes: kind update (silent).",
     "Done with real proof (markdown images ![p](/api/image?path=<enc>)): reply_to_message kind done (auto-moves to approbation).",
-    "Moving to landing/closed requires the human's approval unless the task was created no_review (create_task no_review: true).",
+    "Entering landing/closed requires the human's approval unless the task was created no_review (create_task no_review: true); closing a card already in landing is free.",
     "Proof files must be readable by the BOARD's machine. Running elsewhere? First POST the bytes: /api/upload {dataUrl, filename} -> {path}, then reference THAT path. A path from your own disk renders as a broken image on his board.",
     "He approves -> merge -> move_task landing. Fix present in the build he runs -> close_issue. Never closed before it is in his build; never close what he has not approved.",
     "He refuses -> the card returns to in_progress; iterate.",
@@ -297,7 +297,7 @@ function buildServer() {
     "close_issue",
     {
       description:
-        "Mark a task as present in the human's current build (state closed). He retests it there and archives it himself — this does NOT remove the card from his board. Never close before the fix is actually delivered in his build. Requires his approval on the card first, unless it was created with no_review. Optional note: a final line recorded in the thread.",
+        "Mark a task as present in the human's current build (state closed). He retests it there and archives it himself — this does NOT remove the card from his board. Never close before the fix is actually delivered in his build. Requires his approval on the card first, unless the card is already in landing or was created with no_review. Optional note: a final line recorded in the thread.",
       inputSchema: {
         id: z.string(),
         note: z.string().optional(),
@@ -338,7 +338,7 @@ function buildServer() {
     "move_task",
     {
       description:
-        "Move a task through the board: backlog -> in_progress (you started) -> questions (you need the human — prefer asking via reply_to_message kind question, which moves it automatically) -> approbation (done, proof attached, awaiting his approval) -> landing (approved AND merged) -> closed (present in the build he runs). Moving to landing/closed requires the human's approval unless the task was created no_review. Optional note lands in the thread.",
+        "Move a task through the board: backlog -> in_progress (you started) -> questions (you need the human — prefer asking via reply_to_message kind question, which moves it automatically) -> approbation (done, proof attached, awaiting his approval) -> landing (approved AND merged) -> closed (present in the build he runs). Entering landing/closed requires the human's approval unless the task was created no_review; landing -> closed is free. Optional note lands in the thread.",
       inputSchema: {
         id: z.string(),
         state: z.enum(store.TASK_STATES),

@@ -195,6 +195,15 @@ test("approvedByHuman: human-direction reads the LATEST HUMAN thread entry, so a
   assert.equal(Lifecycle.approvedByHuman({ direction: "human", thread: [] }), false);
 });
 
+test("agentMoveNeedsApproval: landing -> closed is free — the approval was paid at the landing door", () => {
+  // A card in landing either was approved to get there or predates the gate;
+  // demanding a second approval to close would double-bill the human.
+  assert.equal(Lifecycle.agentMoveNeedsApproval({ direction: "human", state: "landing" }, "closed"), false);
+  // Entering landing or closed from a work state still needs the approval.
+  assert.equal(Lifecycle.agentMoveNeedsApproval({ direction: "human", state: "in_progress" }, "closed"), true);
+  assert.equal(Lifecycle.agentMoveNeedsApproval({ direction: "human", state: "approbation" }, "landing"), true);
+});
+
 test("agentMoveNeedsApproval: a human-direction card approved via thread note may land", () => {
   const msg = {
     direction: "human",
