@@ -297,9 +297,11 @@ header.drag-over { outline: 2px dashed #4a90d9; outline-offset: -2px; }
   #board { flex-direction: column; overflow: visible; padding: 0 14px; gap: 0; }
   .col-rail { display: none !important; }
   .column[hidden] { display: flex !important; }
-  .column { padding: 16px 0 8px; }
+  .column { flex: none; padding: 12px 0 4px; }
   .column-scroll { overflow: visible; }
   .column.folded .column-scroll { display: none; }
+  .column-cards.empty::after { display: none; }
+  .column-collapse { margin-left: 0; order: -1; font-size: 14px; }
   [data-state="questions"] { order: 1; }
   [data-state="approbation"] { order: 2; }
   [data-state="in_progress"] { order: 3; }

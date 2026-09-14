@@ -38,6 +38,9 @@ function submitsOnEnter(e) {
 // Grows a textarea to fit its content; CSS max-height (5 lines) plus overflow-y:
 // auto takes over past that, so this never needs to know the cap itself.
 function autoGrow(el) {
+  // Empty box -> one row: scrollHeight would otherwise count a wrapped
+  // placeholder and keep the box two lines tall in a narrow window.
+  if (el.value === "") { el.style.height = ""; return; }
   el.style.height = "auto";
   el.style.height = `${el.scrollHeight}px`;
 }
