@@ -1309,11 +1309,12 @@ async function refresh(force) {
   for (const s of COLUMN_STATES) byState[s] = [];
   for (const m of live) if (byState[m.state]) byState[m.state].push(m);
   for (const s of COLUMN_STATES) byState[s].reverse(); // newest first
-  // Priority (1 first, absent = 2) is a stable sort on top of newest-first, in
+  // Priority (0 first, absent = 2) is a stable sort on top of newest-first, in
   // every column — applied before the backlog-only taskKind sort below so that
   // sort's grouping remains the FIRST key (stable sort preserves this order
-  // within each group).
-  for (const s of COLUMN_STATES) byState[s].sort((a, b) => (a.priority || 2) - (b.priority || 2));
+  // within each group). `?? 2`, not `|| 2`: priority 0 (P0/critical) is falsy
+  // but a real, valid value — `|| 2` would silently normal-ize it.
+  for (const s of COLUMN_STATES) byState[s].sort((a, b) => (a.priority ?? 2) - (b.priority ?? 2));
   // Within Backlog: feedback, then change-request, then projet (stable sort
   // keeps the priority/newest-first order within each group).
   const BACKLOG_RANK = { feedback: 0, "change-request": 1 };

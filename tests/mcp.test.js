@@ -225,6 +225,19 @@ test("create_task/move_task accept blocked_by and priority; set_blockers/set_pri
   assert.equal(store.list().find((m) => m.id === other.id).priority, 2);
 });
 
+test("create_task with priority 0 roundtrips, and set_priority to 0 works", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+
+  const created = await client.callTool({ name: "create_task", arguments: { title: "Critical", priority: 0 } });
+  const id = created.content[0].text;
+  assert.equal(store.list().find((m) => m.id === id).priority, 0);
+
+  const other = store.createTask({ title: "Other" });
+  await client.callTool({ name: "set_priority", arguments: { id: other.id, priority: 0 } });
+  assert.equal(store.list().find((m) => m.id === other.id).priority, 0);
+});
+
 test("set_blockers rejects a cycle through the MCP tool boundary", async () => {
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
@@ -292,6 +305,15 @@ test("list_messages appends blocked_by and priority suffixes only where applicab
   const text = res.content[0].text;
   assert.match(text, /Blocker.* p1/);
   assert.match(text, /Dependent.*blocked_by: /);
+});
+
+test("list_messages shows a P0 card", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const critical = store.createTask({ title: "Critical", priority: 0 });
+
+  const res = await client.callTool({ name: "list_messages", arguments: {} });
+  assert.match(res.content[0].text, new RegExp(`\\[${critical.id}\\].*Critical.* p0`));
 });
 
 // --- attachment validation ---------------------------------------------------

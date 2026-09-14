@@ -74,9 +74,9 @@ function formatDelivered(items) {
   return blocks;
 }
 
-// Shared by every tool that can set a card's priority (1 = highest, 3 = lowest,
-// absent = normal/2).
-const PRIORITY_SCHEMA = z.union([z.literal(1), z.literal(2), z.literal(3)]).optional();
+// Shared by every tool that can set a card's priority (0 = critical, 1 = highest,
+// 3 = lowest, absent = normal/2).
+const PRIORITY_SCHEMA = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]).optional();
 
 // Attachment validation (live incident: a path unreadable on the board machine
 // renders as a broken image/video there, with no signal back to the agent).
@@ -121,7 +121,7 @@ function buildServer() {
     `Review-board workflow (tools ${TOOLS_VERSION}). States: backlog -> in_progress -> questions -> approbation -> landing -> closed.`,
     "Loop: await_replies (at-least-once: acknowledge_messages after reading, or items redeliver; ack = READ, never fixed).",
     "Pick work: the human's feedback backlog cards outrank projet tasks. File your own tasks with create_task.",
-    "Dependencies: set_blockers / blocked_by on create_task/move_task (blocked until blockers reach landing/closed; you get a \"débloquée\" delivery). Priority: set_priority / priority 1-3 (1 first).",
+    "Dependencies: set_blockers / blocked_by on create_task/move_task (blocked until blockers reach landing/closed; you get a \"débloquée\" delivery). Priority: set_priority / priority 0-3 (0 = critical, 1 = highest, then in order).",
     "Start a card: move_task in_progress. Blocked on the human: reply_to_message kind question (auto-moves to questions). Progress notes: kind update (silent).",
     "Done with real proof (markdown images ![p](/api/image?path=<enc>)): reply_to_message kind done (auto-moves to approbation).",
     "Entering landing/closed requires the human's approval unless the task was created no_review (create_task no_review: true); closing a card already in landing is free.",
@@ -209,7 +209,7 @@ function buildServer() {
       const live = store.list();
       const rows = live.map((m) => {
         let row = `[${m.id}] ${m.direction}/${m.kind}/${m.status}/${m.state || "-"}: ${m.title}`;
-        if (m.priority === 1 || m.priority === 3) row += ` p${m.priority}`;
+        if (m.priority === 0 || m.priority === 1 || m.priority === 3) row += ` p${m.priority}`;
         // Only the still-active blockers, matching what the board itself shows
         // (a landed/closed blocker no longer counts, even if still listed in
         // blockedBy).
@@ -426,10 +426,10 @@ function buildServer() {
   server.registerTool(
     "set_priority",
     {
-      description: "Set a card's priority: 1 (highest) to 3 (lowest); absent/2 is normal.",
+      description: "Set a card's priority: 0 (critical) to 3 (lowest); absent/2 is normal.",
       inputSchema: {
         id: z.string(),
-        priority: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+        priority: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]),
       },
     },
     async ({ id, priority }) => {

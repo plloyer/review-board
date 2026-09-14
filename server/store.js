@@ -168,7 +168,7 @@ function addHumanMessage(text, images, replyTo) {
   return msg;
 }
 
-const PRIORITIES = [1, 2, 3];
+const PRIORITIES = [0, 1, 2, 3];
 
 function validatePriority(priority) {
   if (priority !== undefined && !PRIORITIES.includes(priority)) throw new Error(`Invalid priority ${priority}`);

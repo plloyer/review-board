@@ -259,8 +259,8 @@ function awaitingApproved(msg) {
 const TASK_KIND_CHIP_LABEL = { "change-request": "MCR" };
 
 function priorityChipHTML(priority) {
-  if (priority !== 1 && priority !== 3) return ""; // nothing shown for p2/absent
-  return `<span class="chip chip-p${priority}">p${priority}</span>`;
+  const n = priority ?? 2; // absent = normal/2
+  return `<span class="chip chip-p${n}">p${n}</span>`;
 }
 
 // One badge per blocker (finding: list/navigate ALL blockers, not just the

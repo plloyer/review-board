@@ -19,7 +19,7 @@ You move cards (`move_task`, or automatically via `reply_to_message`/`close_issu
 
 ## Dependencies & priority
 
-Dependencies: `set_blockers` / `blocked_by` on `create_task`/`move_task` (blocked until blockers reach `landing`/`closed`; you get a "débloquée" delivery). Priority: `set_priority` / `priority` 1-3 (1 first).
+Dependencies: `set_blockers` / `blocked_by` on `create_task`/`move_task` (blocked until blockers reach `landing`/`closed`; you get a "débloquée" delivery). Priority: `set_priority` / `priority` 0-3 (0 = critical, 1 = highest, then in order).
 
 ## Hard rules
 

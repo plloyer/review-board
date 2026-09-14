@@ -744,6 +744,15 @@ test("setPriority sets/validates priority", () => {
   assert.throws(() => store.setPriority(a.id, 4));
 });
 
+test("setPriority accepts 0 (P0/critical, above 1) and still rejects out-of-range values", () => {
+  const { store } = freshStore();
+  const a = store.createTask({ title: "A" });
+  store.setPriority(a.id, 0);
+  assert.equal(store.list().find((m) => m.id === a.id).priority, 0);
+  assert.throws(() => store.setPriority(a.id, 4));
+  assert.throws(() => store.setPriority(a.id, -1));
+});
+
 test("createTask/moveTask accept priority", () => {
   const { store } = freshStore();
   const a = store.createTask({ title: "A", priority: 1 });
@@ -751,6 +760,13 @@ test("createTask/moveTask accept priority", () => {
   const moved = store.moveTask(a.id, "in_progress", null, { priority: 3 });
   assert.equal(moved.priority, 3);
   assert.throws(() => store.createTask({ title: "B", priority: 9 }));
+});
+
+test("createTask accepts priority 0 and it persists as a real (non-falsy) stored value", () => {
+  const { store } = freshStore();
+  const a = store.createTask({ title: "A", priority: 0 });
+  assert.equal(a.priority, 0);
+  assert.equal(store.list().find((m) => m.id === a.id).priority, 0);
 });
 
 // --- request_change -----------------------------------------------------------

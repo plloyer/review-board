@@ -130,12 +130,15 @@ test("deriveCompactView: blocked badge + flag only when blockedBy is non-empty",
   assert.match(blocked.blockedBadge, /data-blocker-id="u171"[^>]*>bloqu\S* par u171</);
 });
 
-test("deriveCompactView: priority chip shown only for p1/p3, nothing for p2/absent", () => {
+test("deriveCompactView: priority chip shown on every card (p0-p3), absent treated as p2", () => {
   const base = { id: "u1", direction: "human", status: "open", state: "backlog", taskKind: "feedback", title: "T" };
-  assert.equal(Views.deriveCompactView(base).priorityChip, "");
-  assert.equal(Views.deriveCompactView({ ...base, priority: 2 }).priorityChip, "");
+  assert.match(Views.deriveCompactView(base).priorityChip, /chip-p2/);
+  assert.match(Views.deriveCompactView(base).priorityChip, />p2</);
+  assert.match(Views.deriveCompactView({ ...base, priority: 2 }).priorityChip, /chip-p2/);
   assert.match(Views.deriveCompactView({ ...base, priority: 1 }).priorityChip, /chip-p1/);
   assert.match(Views.deriveCompactView({ ...base, priority: 3 }).priorityChip, /chip-p3/);
+  assert.match(Views.deriveCompactView({ ...base, priority: 0 }).priorityChip, /chip-p0/);
+  assert.match(Views.deriveCompactView({ ...base, priority: 0 }).priorityChip, />p0</);
 });
 
 test("deriveCompactView: a change-request card gets the MCR chip label", () => {

@@ -124,7 +124,9 @@ button:hover { background: #444; }
 .chip-change-request { background: #3a2b45; color: #b08fd9; }
 .chip-source { background: #2e3b45; color: #9db8c9; }
 .source-tag { font-size: 10px; color: #77777d; flex-shrink: 0; letter-spacing: 0.03em; }
+.chip-p0 { background: #6b1414; color: #ff9d9d; }
 .chip-p1 { background: #4a2323; color: #e08a8a; }
+.chip-p2 { background: #2c2c30; color: #6e6e74; }
 .chip-p3 { background: #333338; color: #8a8a90; }
 .blocked-badge { font-size: 10px; padding: 1px 6px; border-radius: 4px; background: #3a352b; color: #b0a888; cursor: pointer; }
 .blocked-row { margin-top: 4px; }
