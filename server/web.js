@@ -132,6 +132,21 @@ function createApp({ clipboard } = {}) {
     }
   });
 
+  // Human-only priority triage: mirrors /move's shape (validate the value up
+  // front -> 400, store errors -> 404) so a bad body never has to sniff
+  // store.setPriority's error text to tell "unknown id" from "bad value" apart.
+  web.post("/api/messages/:id/priority", (req, res) => {
+    const { priority } = req.body || {};
+    if (!Number.isInteger(priority) || priority < 0 || priority > 3) {
+      return res.status(400).json({ error: "invalid priority" });
+    }
+    try {
+      res.json(store.setPriority(req.params.id, priority));
+    } catch (err) {
+      res.status(404).json({ error: String(err.message || err) });
+    }
+  });
+
   // Human-only: sends a closed (or landing) card back to backlog — see
   // store.reopen for why the prior approval is retracted. Never exposed over MCP.
   web.post("/api/messages/:id/reopen", (req, res) => {

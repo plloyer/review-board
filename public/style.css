@@ -129,6 +129,16 @@ button:hover { background: #444; }
 .chip-p2 { background: #2c2c30; color: #6e6e74; }
 .chip-p3 { background: #333338; color: #8a8a90; }
 .blocked-badge { font-size: 10px; padding: 1px 6px; border-radius: 4px; background: #3a352b; color: #b0a888; cursor: pointer; }
+/* Human-only priority triage (overlay, backlog cards only) — discreet, same
+   chip-pN palette as the pill it replaces so the active state looks familiar. */
+.prio-select { display: flex; gap: 4px; flex-shrink: 0; }
+.prio-select .prio-set { font-size: 10px; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; border: 1px solid #444; background: #2c2c30; color: #6e6e74; }
+.prio-select .prio-set:hover { background: #38383d; }
+.prio-select .prio-set.active { border-color: transparent; }
+.prio-select .prio-set.chip-p0 { background: #6b1414; color: #ff9d9d; }
+.prio-select .prio-set.chip-p1 { background: #4a2323; color: #e08a8a; }
+.prio-select .prio-set.chip-p2 { background: #2c2c30; color: #6e6e74; }
+.prio-select .prio-set.chip-p3 { background: #333338; color: #8a8a90; }
 .blocked-row { margin-top: 4px; }
 .ccard .mini-thumb { width: 44px; height: 28px; object-fit: cover; border-radius: 4px; flex-shrink: 0; cursor: zoom-in; }
 /* Body text stays neutral even in tinted cards — the accent lives in the dot,

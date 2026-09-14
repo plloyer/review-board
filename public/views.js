@@ -263,6 +263,18 @@ function priorityChipHTML(priority) {
   return `<span class="chip chip-p${n}">p${n}</span>`;
 }
 
+// Human-only triage control (BACKLOG cards only, in the expanded overlay): four
+// buttons instead of the static pill, the current level marked active — reuses
+// the same chip-pN color so it reads consistently with the pill everywhere
+// else. `n === 0` must stay a `===` check here, never `n || ...`: P0 is falsy.
+function prioritySelectorHTML(priority) {
+  const current = priority ?? 2; // absent = normal/2, same convention as the pill
+  const buttons = [0, 1, 2, 3]
+    .map((n) => `<button class="prio-set${n === current ? ` active chip-p${n}` : ""}" data-priority="${n}">P${n}</button>`)
+    .join("");
+  return `<div class="prio-select" id="overlayPrio">${buttons}</div>`;
+}
+
 // One badge per blocker (finding: list/navigate ALL blockers, not just the
 // first) — each carries its own data-blocker-id so app.js can wire every
 // badge to scroll/flash that specific card, not only blockedBy[0].
@@ -506,7 +518,7 @@ function overlayHeader(msg, blockedBy = []) {
         <strong class="overlay-title">${core.shortTitle}</strong>
         ${subtitle}
       </div>
-      ${priorityChipHTML(msg.priority)}
+      ${msg.state === "backlog" ? prioritySelectorHTML(msg.priority) : priorityChipHTML(msg.priority)}
       ${kindBadge}
       <span class="overlay-badge">${esc(STATE_LABEL[msg.state] || msg.state)}</span>
       ${msg.state === "closed" ? `<span class="archive-link" id="overlayReopen">Reopen</span>` : ""}
@@ -605,6 +617,7 @@ const Views = {
   overlayHeader,
   overlayAgentBody,
   overlayHumanBody,
+  prioritySelectorHTML,
   deriveCardCore,
   deriveCompactView,
   deriveCardView,

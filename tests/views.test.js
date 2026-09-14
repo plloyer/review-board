@@ -281,6 +281,28 @@ test("deriveOverlayView: header shows the blocked badge (all active blockers) an
   assert.doesNotMatch(unblocked.headerHTML, /blocked-badge/);
 });
 
+test("deriveOverlayView: a BACKLOG card shows the four-button priority selector instead of the pill, current level active (absent -> P2)", () => {
+  const backlog = { id: "u30", direction: "human", state: "backlog", title: "T", images: [] };
+  const view = Views.deriveOverlayView(backlog);
+  assert.match(view.headerHTML, /id="overlayPrio"/);
+  assert.match(view.headerHTML, /data-priority="2"[^>]*>P2</); // rendered as active below
+  assert.match(view.headerHTML, /class="prio-set active chip-p2" data-priority="2"/);
+  assert.doesNotMatch(view.headerHTML, /class="chip chip-p2">p2</); // pill absent
+  for (const n of [0, 1, 3]) assert.doesNotMatch(view.headerHTML, new RegExp(`prio-set active chip-p${n}`));
+
+  const p0 = Views.deriveOverlayView({ ...backlog, id: "u31", priority: 0 });
+  assert.match(p0.headerHTML, /class="prio-set active chip-p0" data-priority="0"/);
+  assert.doesNotMatch(p0.headerHTML, /prio-set active chip-p2/);
+});
+
+test("deriveOverlayView: a non-backlog card keeps the plain priority pill, no selector", () => {
+  const inProgress = { id: "u32", direction: "human", state: "in_progress", title: "T", images: [], priority: 1 };
+  const view = Views.deriveOverlayView(inProgress);
+  assert.match(view.headerHTML, /chip chip-p1">p1</);
+  assert.doesNotMatch(view.headerHTML, /overlayPrio/);
+  assert.doesNotMatch(view.headerHTML, /prio-set/);
+});
+
 test("deriveOverlayView: header shows a Reopen affordance for a closed card (either direction), never for a live one", () => {
   const closedHuman = { id: "u20", direction: "human", state: "closed", title: "T", images: [] };
   assert.match(Views.deriveOverlayView(closedHuman).headerHTML, /id="overlayReopen"/);

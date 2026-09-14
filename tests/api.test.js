@@ -204,6 +204,38 @@ test("POST /api/messages/:id/reopen sends a closed card back to backlog with the
   });
 });
 
+test("POST /api/messages/:id/priority sets 0-3, rejects a bad value without changing the stored priority, 404s on unknown id", async () => {
+  await withServer(async (base) => {
+    const task = store.createTask({ title: "Triage me" });
+
+    for (const p of [0, 1, 2, 3]) {
+      const res = await fetch(`${base}/api/messages/${task.id}/priority`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ priority: p }),
+      });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.priority, p);
+    }
+
+    const bad = await fetch(`${base}/api/messages/${task.id}/priority`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ priority: 5 }),
+    });
+    assert.equal(bad.status, 400);
+    assert.equal(store.list().find((m) => m.id === task.id).priority, 3, "bad value must not change the stored priority");
+
+    const unknown = await fetch(`${base}/api/messages/does-not-exist/priority`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ priority: 1 }),
+    });
+    assert.equal(unknown.status, 404);
+  });
+});
+
 test("GET and DELETE /mcp-live return 405 (the stateful session machinery is gone; POST still works as an alias of /mcp)", async () => {
   await withServer(async (base) => {
     const get = await fetch(`${base}/mcp-live`);

@@ -1142,6 +1142,19 @@ function renderOverlayBody(msg, blockedBy = []) {
       refresh(true);
     });
   });
+  // BACKLOG-only priority selector (views.js's prioritySelectorHTML) — absent
+  // elsewhere, so this just no-ops on other cards. Left open on click (refresh(true)
+  // re-renders the panel in place, per refresh()'s openCardId sync) rather than
+  // closed, so he can keep triaging without reopening the card each time.
+  panel.querySelectorAll(".prio-set").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      fetchJSON(`/api/messages/${msg.id}/priority`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ priority: Number(btn.dataset.priority) }),
+      }).then(() => refresh(true));
+    })
+  );
   wireOverlayFooter(panel, msg);
   wireOverlayMedia(panel, msg);
 }
