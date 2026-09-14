@@ -263,13 +263,6 @@ function priorityChipHTML(priority) {
   return `<span class="chip chip-p${priority}">p${priority}</span>`;
 }
 
-// Discreet marker for a task created no_review (see shared/lifecycle.js's
-// agentMoveNeedsApproval) — visible on the board, not hidden away.
-function noReviewChipHTML(noReview) {
-  if (!noReview) return "";
-  return `<span class="chip chip-no-review">sans revue</span>`;
-}
-
 // One badge per blocker (finding: list/navigate ALL blockers, not just the
 // first) — each carries its own data-blocker-id so app.js can wire every
 // badge to scroll/flash that specific card, not only blockedBy[0].
@@ -320,7 +313,6 @@ function messageFingerprint(msg, extra = {}) {
     msg.status,
     msg.priority,
     msg.taskKind,
-    msg.noReview,
     msg.blockedBy || null,
     msg.summary,
     msg.title,
@@ -379,7 +371,6 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
         ? `<span class="chip chip-${msg.taskKind}">${esc(TASK_KIND_CHIP_LABEL[msg.taskKind] || msg.taskKind)}</span>`
         : "";
     const priorityChip = priorityChipHTML(msg.priority);
-    const noReviewChip = noReviewChipHTML(msg.noReview);
     const undelivered = msg.direction === "human" && !msg.replyTo && !msg.lastDeliveredAt && !msg.acknowledgedAt;
     const cancelBtn = undelivered ? `<button class="cancel-sent" title="Annuler">×</button>` : "";
 
@@ -394,7 +385,6 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
         dot: core.dot,
         chip,
         priorityChip,
-        noReviewChip,
         sourceChip: core.sourceChip,
         title: core.shortTitle,
         miniThumb: core.miniThumbHTML,
@@ -448,7 +438,6 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
       dot: core.dot,
       chip,
       priorityChip,
-      noReviewChip,
       sourceChip: core.sourceChip,
       title: core.shortTitle,
       miniThumb: core.miniThumbHTML,

@@ -138,13 +138,6 @@ test("deriveCompactView: priority chip shown only for p1/p3, nothing for p2/abse
   assert.match(Views.deriveCompactView({ ...base, priority: 3 }).priorityChip, /chip-p3/);
 });
 
-test("deriveCompactView: a noReview card gets the discreet 'sans revue' chip, absent otherwise", () => {
-  const base = { id: "u1", direction: "human", status: "open", state: "backlog", taskKind: "projet", title: "T" };
-  assert.equal(Views.deriveCompactView(base).noReviewChip, "");
-  assert.match(Views.deriveCompactView({ ...base, noReview: true }).noReviewChip, /sans revue/);
-  assert.match(Views.deriveCompactView({ ...base, noReview: true }).noReviewChip, /chip-no-review/);
-});
-
 test("deriveCompactView: a change-request card gets the MCR chip label", () => {
   const msg = { id: "u1", direction: "human", status: "open", state: "backlog", taskKind: "change-request", title: "Add a feature" };
   const view = Views.deriveCompactView(msg);
