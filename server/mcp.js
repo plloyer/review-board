@@ -112,7 +112,7 @@ function missingTextRefs(text) {
 // Stateless HTTP has no tools/list_changed channel, so the version rides every
 // await_replies trailer instead — a session that connected under an older
 // version learns from the delivery text that its cached tool list is stale.
-const TOOLS_VERSION = "v3";
+const TOOLS_VERSION = "v4"; // v4: approval/retro gates, no_review, retro params on reply_to_message/close_issue
 
 function buildServer() {
   // The workflow travels with the MCP handshake so every client learns it without
