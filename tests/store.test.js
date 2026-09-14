@@ -6,6 +6,7 @@ const assert = require("node:assert/strict");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const Lifecycle = require("../shared/lifecycle");
 
 function freshStore() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "review-board-test-"));
@@ -876,5 +877,81 @@ test("humanThreadNote on a questions-state card moves it back to in_progress (hi
   assert.equal(store.list().find((m) => m.id === h.id).state, "questions");
   store.humanThreadNote(h.id, "voila ma reponse");
   assert.equal(store.list().find((m) => m.id === h.id).state, "in_progress");
+});
+
+// --- reopen (human-only: sends a closed/landing card back to backlog) --------
+
+test("reopen: a closed agent-direction card goes back to backlog, decision cleared, status reset to open, retro preserved, default note appended", () => {
+  const { store } = freshStore();
+  const a1 = store.addAgentMessage({ title: "Review this", kind: "review" }); // -> approbation
+  store.reply(a1.id, { text: "ok", decision: "approved" }); // -> landing, status answered
+  store.setRetro(a1.id, "friction: none");
+  store.moveTask(a1.id, "closed");
+
+  const reopened = store.reopen(a1.id);
+  assert.equal(reopened.state, "backlog");
+  assert.equal(reopened.status, "open");
+  assert.equal(reopened.reply.decision, undefined, "the recorded approval must be retracted");
+  assert.equal(reopened.reply.text, "ok", "the rest of reply stays as history");
+  assert.equal(reopened.retro, "friction: none", "retro must survive a reopen");
+  const tail = reopened.thread.at(-1);
+  assert.equal(tail.from, "human");
+  assert.equal(tail.text, "Rouvert — le build livré a encore des problèmes");
+  assert.ok(tail.at);
+});
+
+test("reopen: a given note is appended verbatim instead of the default", () => {
+  const { store } = freshStore();
+  const a1 = store.addAgentMessage({ title: "Review this", kind: "review" });
+  store.reply(a1.id, { text: "ok", decision: "approved" });
+  store.moveTask(a1.id, "closed");
+  const reopened = store.reopen(a1.id, "still broken on the settings page");
+  assert.equal(reopened.thread.at(-1).text, "still broken on the settings page");
+});
+
+test("reopen: a closed, previously-approved human-direction card is no longer approved (the reopen note becomes the new thread tail)", () => {
+  const { store } = freshStore();
+  const h1 = store.addHumanMessage("bug report", []);
+  store.humanThreadNote(h1.id, "Approuvé ✅");
+  store.moveTask(h1.id, "closed");
+  assert.equal(Lifecycle.approvedByHuman(h1), true, "sanity: was approved before reopen");
+
+  const reopened = store.reopen(h1.id);
+  assert.equal(reopened.state, "backlog");
+  assert.equal(Lifecycle.approvedByHuman(reopened), false, "the reopen note is now the tail, not an approval");
+});
+
+test("reopen also accepts a card currently in landing (not just closed)", () => {
+  const { store } = freshStore();
+  const a1 = store.addAgentMessage({ title: "Review this", kind: "review" });
+  store.reply(a1.id, { text: "ok", decision: "approved" }); // -> landing, never closed
+  const reopened = store.reopen(a1.id);
+  assert.equal(reopened.state, "backlog");
+});
+
+test("reopen throws on a card that isn't closed or landing (e.g. backlog/in_progress), leaving it untouched", () => {
+  const { store } = freshStore();
+  const task = store.createTask({ title: "Do the thing" }); // state backlog
+  assert.throws(() => store.reopen(task.id), /closed|landing/);
+  store.moveTask(task.id, "in_progress");
+  assert.throws(() => store.reopen(task.id), /closed|landing/);
+  assert.equal(store.list().find((m) => m.id === task.id).state, "in_progress");
+});
+
+test("reopen throws on an unknown id", () => {
+  const { store } = freshStore();
+  assert.throws(() => store.reopen("u999"));
+});
+
+test("gate integration: reopening a previously-approved closed card makes agentMoveNeedsApproval true again — the agent must re-earn approval", () => {
+  const { store } = freshStore();
+  const a1 = store.addAgentMessage({ title: "Review this", kind: "review" });
+  store.reply(a1.id, { text: "ok", decision: "approved" }); // -> landing, approved
+  store.setRetro(a1.id, "friction: none");
+  const closed = store.moveTask(a1.id, "closed", null, { actor: "agent" }); // gate passes: approved + retro present
+  assert.equal(Lifecycle.agentMoveNeedsApproval(closed, "closed"), false, "sanity: an approved closed card doesn't need approval");
+
+  const reopened = store.reopen(a1.id);
+  assert.equal(Lifecycle.agentMoveNeedsApproval(reopened, "closed"), true, "must re-earn approval after reopen");
 });
 

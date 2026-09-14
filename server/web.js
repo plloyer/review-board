@@ -132,6 +132,17 @@ function createApp({ clipboard } = {}) {
     }
   });
 
+  // Human-only: sends a closed (or landing) card back to backlog — see
+  // store.reopen for why the prior approval is retracted. Never exposed over MCP.
+  web.post("/api/messages/:id/reopen", (req, res) => {
+    const { note } = req.body || {};
+    try {
+      res.json(store.reopen(req.params.id, note));
+    } catch (err) {
+      res.status(404).json({ error: String(err.message || err) });
+    }
+  });
+
   web.post("/api/messages/:id/seen", (req, res) => {
     try {
       res.json(store.markThreadSeen(req.params.id));

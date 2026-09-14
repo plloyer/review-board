@@ -509,6 +509,7 @@ function overlayHeader(msg, blockedBy = []) {
       ${priorityChipHTML(msg.priority)}
       ${kindBadge}
       <span class="overlay-badge">${esc(STATE_LABEL[msg.state] || msg.state)}</span>
+      ${msg.state === "closed" ? `<span class="archive-link" id="overlayReopen">Reopen</span>` : ""}
       ${msg.direction === "human" ? `<span class="archive-link" id="overlayArchive">Archiver</span>` : ""}
       <button class="overlay-close" id="overlayClose">✕</button>
     </div>

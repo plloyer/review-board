@@ -281,6 +281,17 @@ test("deriveOverlayView: header shows the blocked badge (all active blockers) an
   assert.doesNotMatch(unblocked.headerHTML, /blocked-badge/);
 });
 
+test("deriveOverlayView: header shows a Reopen affordance for a closed card (either direction), never for a live one", () => {
+  const closedHuman = { id: "u20", direction: "human", state: "closed", title: "T", images: [] };
+  assert.match(Views.deriveOverlayView(closedHuman).headerHTML, /id="overlayReopen"/);
+
+  const closedAgent = { id: "r9", direction: "agent", kind: "review", status: "answered", state: "closed", title: "T", options: [], details: [], images: [], videos: [], reply: { decision: "approved" } };
+  assert.match(Views.deriveOverlayView(closedAgent).headerHTML, /id="overlayReopen"/);
+
+  const inProgress = { id: "u21", direction: "human", state: "in_progress", title: "T", images: [] };
+  assert.doesNotMatch(Views.deriveOverlayView(inProgress).headerHTML, /overlayReopen/);
+});
+
 test("deriveOverlayView shows a Rétro block (rendered as markdown) when msg.retro exists, for both directions; omitted when absent", () => {
   const agentMsg = { id: "r2", direction: "agent", kind: "review", status: "answered", state: "landing", title: "T", options: [], details: [], images: [], videos: [], reply: { decision: "approved" }, retro: "friction: none" };
   const withRetro = Views.deriveOverlayView(agentMsg);

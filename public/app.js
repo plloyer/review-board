@@ -1129,6 +1129,19 @@ function renderOverlayBody(msg, blockedBy = []) {
       refresh(true);
     });
   });
+  // The issues the human just typed (if any) become the reopen reason — same
+  // box the reply/comment/followup composer already uses, whichever is showing.
+  panel.querySelector("#overlayReopen")?.addEventListener("click", () => {
+    const note = panel.querySelector("textarea")?.value.trim() || "";
+    fetchJSON(`/api/messages/${msg.id}/reopen`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ note }),
+    }).then(() => {
+      closeOverlay();
+      refresh(true);
+    });
+  });
   wireOverlayFooter(panel, msg);
   wireOverlayMedia(panel, msg);
 }

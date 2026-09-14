@@ -181,6 +181,29 @@ test("DELETE /api/messages/:id cancels a human message", async () => {
   });
 });
 
+test("POST /api/messages/:id/reopen sends a closed card back to backlog with the given note; 404s on unknown id", async () => {
+  await withServer(async (base) => {
+    const unknown = await fetch(`${base}/api/messages/does-not-exist/reopen`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    assert.equal(unknown.status, 404);
+
+    const task = store.createTask({ title: "Do the thing" });
+    store.moveTask(task.id, "closed");
+    const res = await fetch(`${base}/api/messages/${task.id}/reopen`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ note: "still broken" }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.state, "backlog");
+    assert.equal(body.thread.at(-1).text, "still broken");
+  });
+});
+
 test("GET and DELETE /mcp-live return 405 (the stateful session machinery is gone; POST still works as an alias of /mcp)", async () => {
   await withServer(async (base) => {
     const get = await fetch(`${base}/mcp-live`);

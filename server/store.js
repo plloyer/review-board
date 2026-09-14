@@ -565,6 +565,38 @@ function humanThreadNote(id, text) {
   return msg;
 }
 
+// Human-only board action: the delivered build still had issues even though the
+// card was already closed (or landing, waiting on a build that hasn't confirmed
+// yet) — send it back to backlog for a fresh cycle. Never called by the agent/MCP
+// (see web.js's /reopen route: actor human, no gate).
+//
+// A fresh cycle means the PRIOR approval must be retracted, or agentMoveNeedsApproval
+// (shared/lifecycle.js) would let the agent skip straight back to landing/closed
+// without re-earning it: an agent-direction card records approval as reply.decision
+// (cleared here, rest of reply kept as history), while a human-direction card's
+// approval is read off the latest human thread entry — appending this note as the
+// new tail already retracts it there (approvedByHuman never reads reply.decision
+// on a human-direction card), so nothing else is needed on that side.
+function reopen(id, note) {
+  const msg = state.messages.find((m) => m.id === id);
+  if (!msg) throw new Error(`No message ${id}`);
+  if (msg.state !== "closed" && msg.state !== "landing") {
+    throw new Error(`${id} can't be reopened from state "${msg.state}" — only a closed or landing card can be reopened`);
+  }
+  msg.state = "backlog";
+  if (msg.direction === "agent") {
+    if (msg.reply) msg.reply.decision = undefined;
+    // Mirrors moveTask's re-ask path: an answered card sent backward becomes
+    // actionable again instead of sitting silently "answered".
+    msg.status = "open";
+  }
+  const text = note && note.trim() ? note.trim() : "Rouvert — le build livré a encore des problèmes";
+  msg.thread = [...(msg.thread || []), { from: "human", text, at: new Date().toISOString() }];
+  save(state);
+  emitChange();
+  return msg;
+}
+
 // Marks a human message's thread as seen by the human — clears the actionable
 // badge/notification state for it without touching the message otherwise.
 function markThreadSeen(id) {
@@ -619,6 +651,7 @@ module.exports = {
   acknowledge,
   agentReply,
   humanThreadNote,
+  reopen,
   markThreadSeen,
   archive,
   history,
