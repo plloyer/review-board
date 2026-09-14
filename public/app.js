@@ -956,6 +956,10 @@ function compactCard(msg, blockedInfo) {
 // default (nothing stored yet) is collapsed, per spec.
 // ---------------------------------------------------------------------------
 
+const narrowMedia = window.matchMedia("(max-width: 900px)");
+// Each column's wide-mode collapse glyph (restored when leaving narrow mode).
+const wideCollapseGlyph = { backlog: "‹", closed: "›" };
+
 function isCollapsed(state) {
   try {
     const v = localStorage.getItem(`rb-collapsed-${state}`);
@@ -964,20 +968,47 @@ function isCollapsed(state) {
     return true;
   }
 }
+// Renders the current collapsed state, branching on layout: wide folds the whole
+// column down to its rail (as before); narrow keeps the column + its header/count
+// and only hides the cards (.folded -> CSS hides .column-scroll), flipping the
+// collapse glyph to ▾ (open) / ▸ (folded).
+function applyCollapsed(state, collapsed) {
+  const col = document.getElementById(`col-${state}`);
+  const rail = document.getElementById(`rail-${state}`);
+  const glyph = col.querySelector(".column-collapse");
+  if (narrowMedia.matches) {
+    rail.hidden = true;
+    col.hidden = false;
+    col.classList.toggle("folded", collapsed);
+    if (glyph) glyph.textContent = collapsed ? "▸" : "▾";
+  } else {
+    col.classList.remove("folded");
+    rail.hidden = !collapsed;
+    col.hidden = collapsed;
+    if (glyph) glyph.textContent = wideCollapseGlyph[state];
+  }
+}
 function setCollapsed(state, collapsed) {
-  document.getElementById(`rail-${state}`).hidden = !collapsed;
-  document.getElementById(`col-${state}`).hidden = collapsed;
   try {
     localStorage.setItem(`rb-collapsed-${state}`, String(collapsed));
   } catch {}
+  applyCollapsed(state, collapsed);
 }
 ["backlog", "closed"].forEach((state) => {
-  setCollapsed(state, isCollapsed(state));
+  applyCollapsed(state, isCollapsed(state));
+  // Rail click (wide mode only — the rail is hidden in narrow) expands.
   document.getElementById(`rail-${state}`).addEventListener("click", () => setCollapsed(state, false));
-  // The whole column header folds it — a lone tiny arrow is too small a target.
+  // The whole column header toggles fold/unfold — a lone tiny arrow is too small
+  // a target. Toggle (not fold-only) so narrow mode, where the header stays
+  // visible while folded, can unfold from the same click.
   const header = document.getElementById(`col-${state}`).querySelector(".column-header");
   header.style.cursor = "pointer";
-  header.addEventListener("click", () => setCollapsed(state, true));
+  header.addEventListener("click", () => setCollapsed(state, !isCollapsed(state)));
+});
+// Re-apply on crossing the wide/narrow threshold so glyph + fold/rail mechanics
+// match the active layout.
+narrowMedia.addEventListener("change", () => {
+  ["backlog", "closed"].forEach((state) => applyCollapsed(state, isCollapsed(state)));
 });
 
 // ---------------------------------------------------------------------------

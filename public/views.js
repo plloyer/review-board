@@ -173,6 +173,7 @@ function compactSubline(msg, tail) {
     return { cls: "", text: snippet };
   }
   if (msg.direction === "human") {
+    if (msg.createdBy === "agent") return { cls: "", text: "Créée par l'IA" };
     if (msg.acknowledgedAt) return { cls: "", text: "✓ Lu par l'IA · en attente d'une réponse" };
     if (msg.lastDeliveredAt) return { cls: "", text: "Livré — attend confirmation" };
   }
@@ -189,6 +190,7 @@ function sentSubline(msg, delivered, tail) {
     if (tail.kind === "done") return `<span class="ia-reply ia-done">✅ Terminé — à valider : ${tail.snippet}</span>`;
     return `<span class="ia-reply">↳ IA : ${tail.snippet}</span>`;
   }
+  if (msg.direction === "human" && msg.createdBy === "agent") return "Créée par l'IA";
   if (msg.acknowledgedAt) return "✓ Lu par l'IA · en attente d'une réponse";
   if (delivered || msg.lastDeliveredAt) return "Livré — attend confirmation";
   return "En attente de livraison";

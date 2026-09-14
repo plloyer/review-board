@@ -299,7 +299,7 @@ header.drag-over { outline: 2px dashed #4a90d9; outline-offset: -2px; }
   .column[hidden] { display: flex !important; }
   .column { padding: 16px 0 8px; }
   .column-scroll { overflow: visible; }
-  .column-collapse { display: none; }
+  .column.folded .column-scroll { display: none; }
   [data-state="questions"] { order: 1; }
   [data-state="approbation"] { order: 2; }
   [data-state="in_progress"] { order: 3; }

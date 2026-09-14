@@ -328,6 +328,33 @@ test("deriveOverlayView shows a Rétro block (rendered as markdown) when msg.ret
   assert.doesNotMatch(noRetro.bodyHTML, /Rétro/);
 });
 
+// --- Agent-created cards: "Créée par l'IA" subline -------------------------
+
+test("an agent-created card with no thread shows 'Créée par l'IA' in both compact and sent views", () => {
+  const msg = { id: "u40", direction: "human", status: "open", state: "backlog", taskKind: "projet", createdBy: "agent", title: "Do X" };
+  assert.equal(Views.deriveCompactView(msg).sub.text, "Créée par l'IA");
+  assert.equal(Views.deriveSentView(msg, false).sub, "Créée par l'IA");
+});
+
+test("a human-created card (no createdBy) with no thread keeps the old delivery-state subline", () => {
+  const acked = { id: "u41", direction: "human", status: "open", state: "backlog", taskKind: "feedback", title: "T", acknowledgedAt: "2026-01-01T00:00:00.000Z" };
+  assert.match(Views.deriveCompactView(acked).sub.text, /Lu par l'IA/);
+  assert.match(Views.deriveSentView(acked, false).sub, /Lu par l'IA/);
+
+  const delivered = { id: "u42", direction: "human", status: "open", state: "backlog", taskKind: "feedback", title: "T", lastDeliveredAt: "2026-01-01T00:00:00.000Z" };
+  assert.match(Views.deriveCompactView(delivered).sub.text, /Livré/);
+  assert.match(Views.deriveSentView(delivered, false).sub, /Livré/);
+});
+
+test("a card WITH a thread tail shows the tail, never 'Créée par l'IA', regardless of createdBy", () => {
+  const thread = [{ from: "human", text: "un commentaire", at: "2026-01-01T00:00:00.000Z" }];
+  const agentMade = { id: "u43", direction: "human", status: "open", state: "backlog", taskKind: "projet", createdBy: "agent", title: "T", thread };
+  assert.match(Views.deriveCompactView(agentMade).sub.text, /un commentaire/);
+  assert.doesNotMatch(Views.deriveCompactView(agentMade).sub.text, /Créée par l'IA/);
+  assert.match(Views.deriveSentView(agentMade, true).sub, /un commentaire/);
+  assert.doesNotMatch(Views.deriveSentView(agentMade, true).sub, /Créée par l'IA/);
+});
+
 // --- Per-message memoization (inputsKey / caching) --------------------------
 
 test("messageFingerprint changes for every field any surface renders — the staleness guard for the derive*View memoization caches", () => {
