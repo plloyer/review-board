@@ -36,6 +36,20 @@ test("create_task files a backlog project task", async () => {
   assert.equal(task.taskKind, "projet");
 });
 
+test("create_task returns the bare id as its first block, unchanged, plus a dependency reminder block", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const res = await client.callTool({ name: "create_task", arguments: { title: "T" } });
+  // First block stays EXACTLY the id — a caller parsing content[0].text as the id must keep working.
+  const first = res.content[0].text;
+  assert.match(first, /^u?t?\d+$/); // an id like "t1" — no label, no extra text
+  assert.ok(store.list().some((m) => m.id === first));
+  // A second block reminds how to wire dependencies/priority (the friction that prompted this).
+  assert.equal(res.content.length, 2);
+  assert.match(res.content[1].text, /blocked_by/);
+  assert.match(res.content[1].text, /set_blockers/);
+});
+
 test("move_task moves a card and rejects an unknown state", async () => {
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);

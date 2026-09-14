@@ -375,7 +375,17 @@ function buildServer() {
     },
     async ({ title, context, project, blocked_by, priority, no_review }) => {
       const msg = store.createTask({ title, context, project, blockedBy: blocked_by, priority, noReview: no_review });
-      return { content: [{ type: "text", text: msg.id }] };
+      // First block stays the bare id (callers parse it as-is); a second block reminds
+      // how to wire dependencies/priority, which the bare-id return left easy to miss.
+      return {
+        content: [
+          { type: "text", text: msg.id },
+          {
+            type: "text",
+            text: `Created ${msg.id}. Set dependencies with blocked_by (on create_task/move_task) or the set_blockers tool; priority with the priority param or set_priority.`,
+          },
+        ],
+      };
     }
   );
 
