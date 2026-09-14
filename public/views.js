@@ -102,6 +102,15 @@ function threadHTML(msg) {
     .join("");
 }
 
+// Shared by overlayAgentBody/overlayHumanBody: the worker's retrospective,
+// captured at delivery time (reply_to_message's kind:done retro param) or
+// attached late (close_issue's retro param) — discreet, rendered after the
+// thread like any other card markdown. Empty when the card has none.
+function retroHTML(msg) {
+  if (!msg.retro) return "";
+  return `<div class="retro"><div class="retro-label">Rétro</div>${marked.parse(msg.retro, { breaks: true })}</div>`;
+}
+
 // Full-size images grid: card()/overlayAgentBody tag each <img> with data-msg-id
 // (lets the lightbox know which agent card an annotation rides back on) — pass
 // msgId for those; omit it for the human-side surfaces (sentCard/overlayHumanBody),
@@ -209,6 +218,7 @@ function deriveCardCore(msg, { blockedBy = [] } = {}) {
     summaryOrTitle: esc(msg.summary || msg.title),
     miniThumbHTML: firstImage ? `<img src="${imgSrc(firstImage.path)}" class="thumb mini-thumb" />` : "",
     threadHTML: threadHTML(msg),
+    retroHTML: retroHTML(msg),
     tail: threadTail(msg),
     canApprove: isActionableThreadEntry(lastThreadEntry(msg)),
     awaitingDecision: agentAwaitingDecision(msg),
@@ -327,6 +337,7 @@ function messageFingerprint(msg, extra = {}) {
     msg.threadSeenAt,
     (msg.images || []).map((i) => i.path),
     (msg.videos || []).map((v) => v.path),
+    msg.retro || null,
     extra.blockedNow || [],
     extra.pendingCounts || null,
     extra.delivered,
@@ -532,6 +543,7 @@ function overlayAgentBody(msg) {
     ${images ? `<div class="images">${images}</div>` : ""}
     ${videos ? `<div class="videos">${videos}</div>` : ""}
     ${thread ? `<div class="thread">${thread}</div>` : ""}
+    ${core.retroHTML}
   `;
 
   const footerHTML =
@@ -564,6 +576,7 @@ function overlayHumanBody(msg) {
   const bodyHTML = `
     ${images ? `<div class="images">${images}</div>` : ""}
     ${thread ? `<div class="thread">${thread}</div>` : ""}
+    ${core.retroHTML}
   `;
 
   const footerHTML = `

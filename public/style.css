@@ -240,6 +240,9 @@ header.drag-over { outline: 2px dashed #4a90d9; outline-offset: -2px; }
 /* The human's own entries: neutral text, just a subtle green edge to tell the
    two voices apart without green-on-green reading strain. */
 .thread .from-human { color: #d7d7dc; border-left: 2px solid #3a5a3a; padding-left: 8px; }
+/* Discreet — sits after the thread, doesn't compete with it. */
+.retro { margin-top: 10px; padding-top: 8px; border-top: 1px dashed #444; color: #a5a5ab; font-size: 13px; }
+.retro-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: #77777d; margin-bottom: 2px; }
 
 #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #7a2e2e; color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 13px; opacity: 0; pointer-events: none; transition: opacity 0.3s; z-index: 400; }
 #toast.visible { opacity: 1; }

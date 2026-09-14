@@ -285,6 +285,20 @@ test("deriveOverlayView: header shows the blocked badge (all active blockers) an
   assert.doesNotMatch(unblocked.headerHTML, /blocked-badge/);
 });
 
+test("deriveOverlayView shows a Rétro block (rendered as markdown) when msg.retro exists, for both directions; omitted when absent", () => {
+  const agentMsg = { id: "r2", direction: "agent", kind: "review", status: "answered", state: "landing", title: "T", options: [], details: [], images: [], videos: [], reply: { decision: "approved" }, retro: "friction: none" };
+  const withRetro = Views.deriveOverlayView(agentMsg);
+  assert.match(withRetro.bodyHTML, /Rétro/);
+  assert.match(withRetro.bodyHTML, /friction: none/);
+
+  const humanMsg = { id: "u17", direction: "human", state: "closed", title: "T", images: [], retro: "friction: none" };
+  const humanWithRetro = Views.deriveOverlayView(humanMsg);
+  assert.match(humanWithRetro.bodyHTML, /Rétro/);
+
+  const noRetro = Views.deriveOverlayView({ ...humanMsg, id: "u18", retro: undefined });
+  assert.doesNotMatch(noRetro.bodyHTML, /Rétro/);
+});
+
 // --- Per-message memoization (inputsKey / caching) --------------------------
 
 test("messageFingerprint changes for every field any surface renders — the staleness guard for the derive*View memoization caches", () => {
@@ -311,6 +325,7 @@ test("messageFingerprint changes for every field any surface renders — the sta
     threadSeenAt: "2026-01-01T00:00:00.000Z",
     images: [{ path: "a.png" }],
     videos: [{ path: "b.mp4" }],
+    retro: null,
   };
   const baseKey = Views.messageFingerprint(base);
 
@@ -333,6 +348,7 @@ test("messageFingerprint changes for every field any surface renders — the sta
     threadSeenAt: "2026-02-01T00:00:00.000Z",
     images: [{ path: "c.png" }],
     videos: [{ path: "d.mp4" }],
+    retro: "some retro text",
   };
   for (const [field, value] of Object.entries(mutations)) {
     const key = Views.messageFingerprint({ ...base, [field]: value });

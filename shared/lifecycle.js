@@ -122,6 +122,28 @@ function agentMoveNeedsApproval(msg, toState) {
   return !approvedByHuman(msg);
 }
 
+// Refusal text for agentMoveNeedsApproval — shared by store.moveTask's own gate
+// and mcp.js's close_issue pre-check (which must refuse before writing anything,
+// so it composes the same words without going through moveTask first).
+function agentApprovalRequiredText(id, toState) {
+  return `${id} needs the human's approval before moving to ${toState}: deliver with reply_to_message kind "done" and wait for the human's approval, or the task must have been created with no_review.`;
+}
+
+// The retrospective's three fixed points — every point of enforcement (the
+// close/move refusal, the tool descriptions that mention it) shares this one
+// copy, so the wording an agent is told to follow and the wording it's refused
+// with can never drift apart.
+const RETRO_TEMPLATE_TEXT =
+  "Friction encountered — what slowed the work down or took trial and error.\n" +
+  "Config/skill gaps — any rule, tool, or instruction that was missing, wrong, or unclear.\n" +
+  "What to do differently — the one change that would have made this task faster or cleaner.\n" +
+  "A few sentences per point; state \"none\" explicitly rather than omitting a point.";
+
+// Refusal text for a close attempt with no retrospective stored or passed.
+function retroRequiredText(id) {
+  return `${id} needs a retrospective before it can close. Attach one on the kind:done delivery (reply_to_message retro param) or at close time (close_issue retro param):\n${RETRO_TEMPLATE_TEXT}`;
+}
+
 // The ids in msg.blockedBy that are still active blockers: they exist in `all`
 // (a card list) and aren't in state landing/closed yet. A blockedBy id absent
 // from `all` is not blocking (never found = never blocks).
@@ -198,6 +220,9 @@ const Lifecycle = {
   APPROVAL_TEXT_RE,
   approvedByHuman,
   agentMoveNeedsApproval,
+  agentApprovalRequiredText,
+  RETRO_TEMPLATE_TEXT,
+  retroRequiredText,
   activeBlockers,
   isBlocked,
   extractPathRefs,

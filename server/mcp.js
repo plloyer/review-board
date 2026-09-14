@@ -4,7 +4,14 @@ const path = require("path");
 const { McpServer } = require("@modelcontextprotocol/sdk/server/mcp.js");
 const { z } = require("zod");
 const store = require("./store");
-const { activeBlockers, extractPathRefs } = require("../shared/lifecycle");
+const {
+  activeBlockers,
+  extractPathRefs,
+  agentMoveNeedsApproval,
+  agentApprovalRequiredText,
+  RETRO_TEMPLATE_TEXT,
+  retroRequiredText,
+} = require("../shared/lifecycle");
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -122,6 +129,7 @@ function buildServer() {
     "He approves -> merge -> move_task landing. Fix present in the build he runs -> close_issue. Never closed before it is in his build; never close what he has not approved.",
     "He refuses -> the card returns to in_progress; iterate.",
     "Board bug or missing tool? request_change — never patch the board yourself.",
+    "Every card needs a retrospective before it can close. The work is usually a subagent's: REQUIRE your subagent to end its final report with the three-point retro, and attach it to your kind:done delivery (reply_to_message retro param); close_issue also accepts it late but will refuse a card with none.",
   ].join("\n");
 
   const server = new McpServer(
@@ -273,7 +281,7 @@ function buildServer() {
     "reply_to_message",
     {
       description:
-        "Reply under the human's message/issue on their board (e.g. \"fixed in <sha>\"). This is how you tell the human an issue they filed is resolved — acknowledge_messages only marks it read, it no longer removes it from their board. Kind 'question' also moves the card to state questions; kind 'done' moves it to approbation. Embedded proof images must use a path readable by the board's machine — from another machine, POST /api/upload {dataUrl, filename} first and reference the returned path. When the human has approved AND the fix is delivered, finish with close_issue.",
+        "Reply under the human's message/issue on their board (e.g. \"fixed in <sha>\"). This is how you tell the human an issue they filed is resolved — acknowledge_messages only marks it read, it no longer removes it from their board. Kind 'question' also moves the card to state questions; kind 'done' moves it to approbation. Embedded proof images must use a path readable by the board's machine — from another machine, POST /api/upload {dataUrl, filename} first and reference the returned path. A kind:'done' delivery should carry the worker's retro param — every card needs one before it can close. When the human has approved AND the fix is delivered, finish with close_issue.",
       inputSchema: {
         id: z.string(),
         text: z.string(),
@@ -283,12 +291,32 @@ function buildServer() {
           .describe(
             "kind: 'update' (default) for routine progress notes — silent, no notification; 'question' when you need the human's input to continue — pings them and moves the card to questions; 'done' when the work on this issue is complete and awaits their validation — pings them and moves the card to approbation."
           ),
+        retro: z
+          .string()
+          .optional()
+          .describe(
+            "Only honored with kind 'done'. Attach the worker's retrospective at delivery time, while the subagent that did the work can still be asked for it."
+          ),
       },
     },
-    async ({ id, text, kind }) => {
+    async ({ id, text, kind, retro }) => {
+      // Validated before agentReply so a rejected call has no side effects at
+      // all — nothing stored, no reply recorded (a "done" retro attached to a
+      // silent "update" would be premature; see stateAfterAgentReply).
+      if (retro && kind !== "done") {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: 'retro is only stored on a kind "done" delivery — resend it with your done, or pass it to close_issue',
+            },
+          ],
+        };
+      }
       const missing = missingTextRefs(text);
       if (missing.length) return { isError: true, content: [{ type: "text", text: attachmentErrorText(missing) }] };
-      store.agentReply(id, text, kind);
+      store.agentReply(id, text, kind, { retro });
       return { content: [{ type: "text", text: `Replied to ${id}` }] };
     }
   );
@@ -297,13 +325,30 @@ function buildServer() {
     "close_issue",
     {
       description:
-        "Mark a task as present in the human's current build (state closed). He retests it there and archives it himself — this does NOT remove the card from his board. Never close before the fix is actually delivered in his build. Requires his approval on the card first, unless the card is already in landing or was created with no_review. Optional note: a final line recorded in the thread.",
+        "Mark a task as present in the human's current build (state closed). He retests it there and archives it himself — this does NOT remove the card from his board. Never close before the fix is actually delivered in his build. Requires his approval on the card first, unless the card is already in landing or was created with no_review. Also requires a retrospective: refuses (with the three-point template) a card that has none stored and none passed here — pass retro, or attach one earlier via reply_to_message's kind:done delivery. Optional note: a final line recorded in the thread.",
       inputSchema: {
         id: z.string(),
         note: z.string().optional(),
+        retro: z
+          .string()
+          .optional()
+          .describe(
+            `Attaches the retrospective late if the card doesn't already carry one from its done delivery. Required one way or the other before a card can close:\n${RETRO_TEMPLATE_TEXT}`
+          ),
       },
     },
-    async ({ id, note }) => {
+    async ({ id, note, retro }) => {
+      const msg = store.list().find((m) => m.id === id);
+      if (!msg) throw new Error(`No message ${id}`);
+      // Validate everything before mutating anything: approval first (an
+      // unapproved card is refused before a passed retro is ever written —
+      // reordered from an earlier version that wrote it first), then the
+      // retro requirement. Only once both pass do we write.
+      if (agentMoveNeedsApproval(msg, "closed")) {
+        return { isError: true, content: [{ type: "text", text: agentApprovalRequiredText(id, "closed") }] };
+      }
+      if (!retro && !msg.retro) return { isError: true, content: [{ type: "text", text: retroRequiredText(id) }] };
+      if (retro) store.setRetro(id, retro);
       // Same gate as move_task — closed is the other road past approbation, and
       // an ungated close_issue would make the move_task gate pointless.
       store.moveTask(id, "closed", note, { actor: "agent" });

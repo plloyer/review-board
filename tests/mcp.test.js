@@ -67,7 +67,7 @@ test("close_issue moves an APPROVED card to closed without archiving it off the 
   const client = await connectedClient(mcp);
   const h1 = store.addHumanMessage("bug report", []);
   store.humanThreadNote(h1.id, "Approuvé ✅");
-  await client.callTool({ name: "close_issue", arguments: { id: h1.id, note: "shipped in build 42" } });
+  await client.callTool({ name: "close_issue", arguments: { id: h1.id, note: "shipped in build 42", retro: "friction: none" } });
   const still = store.list().find((m) => m.id === h1.id);
   assert.ok(still, "close_issue must not remove the card — the human archives it himself");
   assert.equal(still.state, "closed");
@@ -78,10 +78,95 @@ test("close_issue refuses an unapproved card — same gate as move_task", async 
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
   const h1 = store.addHumanMessage("bug report", []);
+  store.setRetro(h1.id, "friction: none"); // retro present — this must still fail on the approval gate, not the retro gate
   const res = await client.callTool({ name: "close_issue", arguments: { id: h1.id } });
   assert.equal(res.isError, true);
   assert.match(res.content[0].text, /approval/);
   assert.notEqual(store.list().find((m) => m.id === h1.id).state, "closed");
+});
+
+// --- retrospective gate -------------------------------------------------------
+
+test("reply_to_message kind 'done' stores the retro param on the card", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const h1 = store.addHumanMessage("bug report", []);
+  await client.callTool({
+    name: "reply_to_message",
+    arguments: { id: h1.id, text: "fixed, ready for review", kind: "done", retro: "Friction: none. Gaps: none. Different: none." },
+  });
+  assert.equal(store.list().find((m) => m.id === h1.id).retro, "Friction: none. Gaps: none. Different: none.");
+});
+
+test("close_issue refuses a no_review card with no retro anywhere, citing the three-point template", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const task = store.createTask({ title: "Trivial task", noReview: true });
+  const res = await client.callTool({ name: "close_issue", arguments: { id: task.id } });
+  assert.equal(res.isError, true);
+  assert.match(res.content[0].text, /Friction encountered/);
+  assert.match(res.content[0].text, /Config\/skill gaps/);
+  assert.match(res.content[0].text, /What to do differently/);
+  assert.notEqual(store.list().find((m) => m.id === task.id).state, "closed");
+});
+
+test("close_issue succeeds on a no_review card when a retro is passed at close time", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const task = store.createTask({ title: "Trivial task", noReview: true });
+  const res = await client.callTool({ name: "close_issue", arguments: { id: task.id, retro: "friction: none, gaps: none, different: none" } });
+  assert.equal(res.isError, undefined, res.content?.[0]?.text);
+  const closed = store.list().find((m) => m.id === task.id);
+  assert.equal(closed.state, "closed");
+  assert.equal(closed.retro, "friction: none, gaps: none, different: none");
+});
+
+test("close_issue succeeds on a no_review card whose retro was already attached by the done delivery", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const task = store.createTask({ title: "Trivial task", noReview: true });
+  store.agentReply(task.id, "done, proof attached", "done", { retro: "friction: none" });
+  const res = await client.callTool({ name: "close_issue", arguments: { id: task.id } });
+  assert.equal(res.isError, undefined, res.content?.[0]?.text);
+  assert.equal(store.list().find((m) => m.id === task.id).state, "closed");
+});
+
+test("close_issue({retro}) on an unapproved card returns the APPROVAL error and never writes the retro", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const h1 = store.addHumanMessage("bug report", []);
+  const res = await client.callTool({ name: "close_issue", arguments: { id: h1.id, retro: "friction: none" } });
+  assert.equal(res.isError, true);
+  assert.match(res.content[0].text, /approval/);
+  const msg = store.list().find((m) => m.id === h1.id);
+  assert.equal(msg.retro, undefined, "retro must not be written when the approval check fails");
+  assert.notEqual(msg.state, "closed");
+});
+
+test("move_task to closed refuses without a retro on an already-approved card — closes the move_task bypass around close_issue's gate", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const h1 = store.addHumanMessage("bug report", []);
+  store.humanThreadNote(h1.id, "Approuvé ✅"); // approved: only the retro gate is left to exercise
+  const res = await client.callTool({ name: "move_task", arguments: { id: h1.id, state: "closed" } });
+  assert.equal(res.isError, true);
+  assert.match(res.content[0].text, /retrospective/);
+  assert.notEqual(store.list().find((m) => m.id === h1.id).state, "closed");
+});
+
+test("reply_to_message rejects a retro param on any kind other than 'done', with no side effects", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const h1 = store.addHumanMessage("bug report", []);
+  const res = await client.callTool({
+    name: "reply_to_message",
+    arguments: { id: h1.id, text: "still on it", kind: "update", retro: "should be refused" },
+  });
+  assert.equal(res.isError, true);
+  assert.match(res.content[0].text, /kind "done"/);
+  const msg = store.list().find((m) => m.id === h1.id);
+  assert.equal(msg.retro, undefined, "no retro must be stored");
+  assert.equal((msg.thread || []).length, 0, "no reply must be recorded");
 });
 
 test("the approved human-direction workflow lands: create_task -> done -> Approuvé -> move_task landing", async () => {

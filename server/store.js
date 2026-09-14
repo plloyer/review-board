@@ -2,7 +2,16 @@
 const fs = require("fs");
 const path = require("path");
 const { EventEmitter } = require("events");
-const { TASK_STATES, KIND_TO_STATE, stateAfterReply, stateAfterAgentReply, isBlocked, agentMoveNeedsApproval } = require("../shared/lifecycle");
+const {
+  TASK_STATES,
+  KIND_TO_STATE,
+  stateAfterReply,
+  stateAfterAgentReply,
+  isBlocked,
+  agentMoveNeedsApproval,
+  agentApprovalRequiredText,
+  retroRequiredText,
+} = require("../shared/lifecycle");
 
 // ponytail: flat JSON file + in-memory array, single local user, no DB needed.
 const DATA_DIR = process.env.REVIEW_BOARD_DATA_DIR || path.join(__dirname, "..", "data");
@@ -299,9 +308,17 @@ function moveTask(id, newState, note, opts = {}) {
   // gated — the web route (human dragging a card) never passes actor, so it
   // stays unrestricted. Thrown before any mutation below.
   if (actor === "agent" && agentMoveNeedsApproval(msg, newState)) {
-    throw new Error(
-      `${id} needs the human's approval before moving to ${newState}: deliver with reply_to_message kind "done" and wait for the human's approval, or the task must have been created with no_review.`
-    );
+    throw new Error(agentApprovalRequiredText(id, newState));
+  }
+
+  // Closing needs a retrospective too — about the WORK, not the review, so it
+  // applies regardless of landing state or no_review (a landing card still
+  // needs its retro to close). Checked after the approval gate, before any
+  // mutation, so a doubly-failing card reports approval first. This is the
+  // gate that closes the move_task({state:"closed"}) bypass around
+  // close_issue's own retro check.
+  if (actor === "agent" && newState === "closed" && !msg.retro) {
+    throw new Error(retroRequiredText(id));
   }
 
   // Snapshot dependents' blocked status BEFORE this card's state changes, so an
@@ -471,11 +488,34 @@ function acknowledge(ids) {
   return acked.length + noticesRemoved;
 }
 
+// Separator between retro rounds appended by mergeRetro — visually distinct
+// from the markdown body so multiple rounds stay legible and separable when
+// mined later.
+const RETRO_SEPARATOR = "\n\n---\n\n";
+
+// Adds one retro round to a card: no existing retro -> set; identical text (or
+// text that's already the current tail) -> no-op, so a retried done/close
+// never duplicates a round already recorded; otherwise append, so every round
+// survives for mining rather than a later one clobbering an earlier one.
+// Shared by agentReply's done-path and setRetro — the one place this policy
+// lives.
+function mergeRetro(msg, text) {
+  if (!msg.retro) {
+    msg.retro = text;
+    return;
+  }
+  const tailIdx = msg.retro.lastIndexOf(RETRO_SEPARATOR);
+  const tail = tailIdx === -1 ? msg.retro : msg.retro.slice(tailIdx + RETRO_SEPARATOR.length);
+  if (tail === text) return;
+  msg.retro = `${msg.retro}${RETRO_SEPARATOR}${text}`;
+}
+
 // Agent tells the human an issue they filed is resolved, without removing the card —
 // the human archives it themselves once satisfied. Also applies the kind's kanban
 // transition (question -> questions, done -> approbation, update -> no move) so
 // callers (mcp.js) don't have to — the transition policy lives here, once.
-function agentReply(id, text, kind = "update") {
+function agentReply(id, text, kind = "update", opts = {}) {
+  const { retro } = opts;
   const msg = state.messages.find((m) => m.id === id);
   if (!msg) throw new Error(`No message ${id}`);
   if (msg.direction !== "human") throw new Error(`Message ${id} is not a human message`);
@@ -485,6 +525,25 @@ function agentReply(id, text, kind = "update") {
   // card that already shipped or is on its way stays put; the reply itself is
   // still recorded above.
   if (next && msg.state !== "closed" && msg.state !== "landing") msg.state = next;
+  // Retro capture at delivery time: only a "done" delivery carries the worker's
+  // retrospective (the whole point is it's written by whoever just finished the
+  // work, while they're still around to write it) — a "question"/"update" retro
+  // param would be premature and is silently ignored.
+  if (kind === "done" && retro) mergeRetro(msg, retro);
+  save(state);
+  emitChange();
+  return msg;
+}
+
+// Attaches a card's retrospective after the fact (appending onto any it
+// already carries, via mergeRetro) — e.g. close_issue accepting one late,
+// whether the card's done-delivery never carried one (the subagent that did
+// the work may be long gone by close time) or it did and this is one more
+// round. Works on any live card, agent- or human-direction.
+function setRetro(id, text) {
+  const msg = state.messages.find((m) => m.id === id);
+  if (!msg) throw new Error(`No message ${id}`);
+  mergeRetro(msg, text);
   save(state);
   emitChange();
   return msg;
@@ -552,6 +611,7 @@ module.exports = {
   setBlockers,
   setPriority,
   setSummary,
+  setRetro,
   reply,
   list,
   peekDeliverable,

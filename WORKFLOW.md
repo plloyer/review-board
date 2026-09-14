@@ -28,3 +28,9 @@ Dependencies: `set_blockers` / `blocked_by` on `create_task`/`move_task` (blocke
 3. Never `closed` before the fix is in the build he runs; never close a card he has not approved.
 4. Board bug or missing tool? `request_change` — never patch the board yourself.
 5. Entering `landing`/`closed` requires his approval unless the task was created `no_review` — `move_task`/`close_issue` refuse otherwise. Closing a card already in `landing` is free (the approval was paid at the landing door).
+6. Every card needs a retrospective before it can close. The work is usually a subagent's, and it's gone by close time — so require your subagent to end its final report with the three points below, and attach them to your `kind:"done"` delivery (`reply_to_message`'s `retro` param). `close_issue` also accepts one late, but refuses a card with none stored and none passed — and so does `move_task(id, "closed")`, the same way, so there's no bypass around the gate:
+   - Friction encountered — what slowed the work down or took trial and error.
+   - Config/skill gaps — any rule, tool, or instruction that was missing, wrong, or unclear.
+   - What to do differently — the one change that would have made this task faster or cleaner.
+
+   A few sentences per point; state "none" explicitly rather than omitting a point. (Canonical wording: `shared/lifecycle.js`'s `RETRO_TEMPLATE_TEXT`.)

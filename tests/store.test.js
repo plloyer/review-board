@@ -234,6 +234,64 @@ test("agentReply applies stateAfterAgentReply itself: question -> questions, don
   assert.equal(store.list().find((m) => m.id === h1.id).state, "approbation");
 });
 
+test("agentReply kind 'done' with a retro opt stores it on the card; other kinds ignore it", () => {
+  const { store } = freshStore();
+  const h1 = store.addHumanMessage("bug report", []);
+  store.agentReply(h1.id, "still on it", "update", { retro: "should be ignored" });
+  assert.equal(store.list().find((m) => m.id === h1.id).retro, undefined);
+  const updated = store.agentReply(h1.id, "fixed, ready for review", "done", { retro: "Friction: none. Gaps: none. Different: none." });
+  assert.equal(updated.retro, "Friction: none. Gaps: none. Different: none.");
+  assert.equal(store.list().find((m) => m.id === h1.id).retro, "Friction: none. Gaps: none. Different: none.");
+});
+
+test("setRetro attaches a retro to any live card, independent of agentReply", () => {
+  const { store } = freshStore();
+  const a1 = store.addAgentMessage({ title: "Review this", kind: "review" });
+  const updated = store.setRetro(a1.id, "late-attached retro");
+  assert.equal(updated.retro, "late-attached retro");
+  assert.equal(store.list().find((m) => m.id === a1.id).retro, "late-attached retro");
+});
+
+test("setRetro throws on an unknown id", () => {
+  const { store } = freshStore();
+  assert.throws(() => store.setRetro("u999", "x"));
+});
+
+test("a retro survives archive() untouched (archive copies the whole message)", () => {
+  const { store } = freshStore();
+  const h1 = store.addHumanMessage("bug report", []);
+  store.agentReply(h1.id, "fixed, ready for review", "done", { retro: "friction: none" });
+  store.archive(h1.id);
+  const hist = store.history();
+  assert.equal(hist.find((m) => m.id === h1.id).retro, "friction: none");
+});
+
+// --- retro append semantics (mergeRetro, shared by agentReply's done-path and setRetro) --
+
+test("two 'done' rounds accumulate both retro texts in order, separated", () => {
+  const { store } = freshStore();
+  const h1 = store.addHumanMessage("bug report", []);
+  store.agentReply(h1.id, "round 1", "done", { retro: "first retro" });
+  store.agentReply(h1.id, "round 2", "done", { retro: "second retro" });
+  assert.equal(store.list().find((m) => m.id === h1.id).retro, "first retro\n\n---\n\nsecond retro");
+});
+
+test("a retried 'done' with an identical retro does not duplicate it", () => {
+  const { store } = freshStore();
+  const h1 = store.addHumanMessage("bug report", []);
+  store.agentReply(h1.id, "round 1", "done", { retro: "same retro" });
+  store.agentReply(h1.id, "round 1, retried", "done", { retro: "same retro" });
+  assert.equal(store.list().find((m) => m.id === h1.id).retro, "same retro");
+});
+
+test("setRetro at close time appends onto a retro the card already has, instead of replacing it", () => {
+  const { store } = freshStore();
+  const h1 = store.addHumanMessage("bug report", []);
+  store.agentReply(h1.id, "done, proof attached", "done", { retro: "done-time retro" });
+  const updated = store.setRetro(h1.id, "close-time retro");
+  assert.equal(updated.retro, "done-time retro\n\n---\n\nclose-time retro");
+});
+
 test("markThreadSeen stamps threadSeenAt", () => {
   const { store } = freshStore();
   const h1 = store.addHumanMessage("bug report", []);
@@ -737,8 +795,33 @@ test("moveTask(actor 'agent') succeeds once the card carries an approved reply",
   const { store } = freshStore();
   const a1 = store.addAgentMessage({ title: "Review this", kind: "review" }); // -> approbation
   store.reply(a1.id, { text: "ok", decision: "approved" }); // -> landing
+  store.setRetro(a1.id, "friction: none"); // this test's subject is the approval gate, not the retro gate
   const closed = store.moveTask(a1.id, "closed", null, { actor: "agent" });
   assert.equal(closed.state, "closed");
+});
+
+// --- retrospective gate on close (store-level; closes the move_task bypass) --
+
+test("moveTask(actor 'agent') to closed refuses with no retro, even once approved — this closes the move_task({state:'closed'}) bypass around close_issue's gate", () => {
+  const { store } = freshStore();
+  const a1 = store.addAgentMessage({ title: "Review this", kind: "review" }); // -> approbation
+  store.reply(a1.id, { text: "ok", decision: "approved" }); // -> landing, approved, still no retro
+  assert.throws(() => store.moveTask(a1.id, "closed", null, { actor: "agent" }), /retrospective/);
+  assert.equal(store.list().find((m) => m.id === a1.id).state, "landing", "refused move must leave state untouched");
+});
+
+test("moveTask(actor 'agent') to closed refuses with no retro even for a no_review task (the retro is about the work, not the review)", () => {
+  const { store } = freshStore();
+  const task = store.createTask({ title: "Trivial task", noReview: true });
+  store.moveTask(task.id, "in_progress");
+  assert.throws(() => store.moveTask(task.id, "closed", null, { actor: "agent" }), /retrospective/);
+});
+
+test("moveTask(actor 'agent') to closed on a doubly-failing card (unapproved, no retro) reports the approval error first", () => {
+  const { store } = freshStore();
+  const task = store.createTask({ title: "Do the thing" }); // unapproved, no retro
+  store.moveTask(task.id, "in_progress");
+  assert.throws(() => store.moveTask(task.id, "closed", null, { actor: "agent" }), /approval/);
 });
 
 test("moveTask(actor 'agent') succeeds for a task created no_review, with no reply at all", () => {
