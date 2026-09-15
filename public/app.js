@@ -817,7 +817,7 @@ function wireBlockedBadges(container) {
 function compactCard(msg, blockedInfo) {
   const view = deriveCompactView(msg, blockedInfo);
   const el = document.createElement("div");
-  el.className = `ccard${view.blocked ? " blocked" : ""}${view.awaitingAgent ? " repondu" : ""}`;
+  el.className = `ccard${view.dimmed ? " blocked" : ""}${view.awaitingAgent ? " repondu" : ""}`;
   el.dataset.msgId = msg.id;
 
   el.innerHTML = `

@@ -482,3 +482,23 @@ test("deriveCompactView memoizes: an unchanged msg reuses the cached view withou
     global.marked.parse = realParse;
   }
 });
+
+test("deriveCompactView: a blocked card that awaits the human's input keeps the badge but is not dimmed", () => {
+  const question = { id: "u1", direction: "human", status: "open", state: "questions", title: "Q", thread: [{ from: "agent", kind: "question", text: "which one?" }] };
+  const view = Views.deriveCompactView(question, { blockedBy: ["u9"] });
+  assert.equal(view.blocked, true);
+  assert.equal(view.dimmed, false);
+  assert.match(view.blockedBadge, /u9/);
+
+  // Approval round-trip as the store produces it: the agent's "done" lands the card in
+  // approbation (awaits the human), the human's "Approuvé" leaves state untouched but
+  // hands the card back to the agent, so dimming resumes.
+  const awaitingApproval = { ...question, id: "u2", state: "approbation", thread: [{ from: "agent", kind: "done", text: "shipped" }] };
+  assert.equal(Views.deriveCompactView(awaitingApproval, { blockedBy: ["u9"] }).dimmed, false);
+  const approved = { ...awaitingApproval, id: "u3", thread: [...awaitingApproval.thread, { from: "human", text: "Approuvé" }] };
+  assert.equal(Views.deriveCompactView(approved, { blockedBy: ["u9"] }).dimmed, true);
+
+  const working = { ...question, id: "u4", state: "in_progress" };
+  assert.equal(Views.deriveCompactView(working, { blockedBy: ["u9"] }).dimmed, true);
+  assert.equal(Views.deriveCompactView(working, { blockedBy: [] }).dimmed, false);
+});

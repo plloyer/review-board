@@ -227,8 +227,14 @@ function deriveCardCore(msg, { blockedBy = [] } = {}) {
     unseenActionable: unseenActionable(msg),
     awaitingAgent: awaitingAgent(msg),
     blocked: blockedBy.length > 0,
+    dimmed: blockedBy.length > 0 && !awaitsHumanInput(msg),
     blockedBy,
   };
+}
+
+// Blocked-but-unanswered questions/approvals stay undimmed: dimming would hide the one card that needs a reply.
+function awaitsHumanInput(msg) {
+  return agentAwaitingDecision(msg) && !awaitingAgent(msg);
 }
 
 // The human's own last word on an awaitingAgent card: msg.reply for an
@@ -410,6 +416,7 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
         sub: { cls: "sub-human", text: `↳ Toi : ${snippet} · en attente de l'IA` },
         actionsHTML: msg.state === "closed" ? archiveActionHTML() : "",
         blocked: core.blocked,
+        dimmed: core.dimmed,
         blockedBadge: blockedBadgeHTML(blockedBy),
         awaitingAgent: true,
       };
@@ -460,6 +467,7 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
       sub,
       actionsHTML,
       blocked: core.blocked,
+      dimmed: core.dimmed,
       blockedBadge: blockedBadgeHTML(blockedBy),
       awaitingAgent: false,
     };
