@@ -1,5 +1,5 @@
 "use strict";
-const { app, BrowserWindow, Notification, screen, nativeImage, clipboard, Menu } = require("electron");
+const { app, BrowserWindow, Notification, screen, nativeImage, clipboard, Menu, Tray } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const url = require("url");
@@ -169,29 +169,53 @@ function createWindow() {
   };
   win.on("resize", persistBounds);
   win.on("move", persistBounds);
+
+  // Closing the window must not take the HTTP/MCP server down with it: the
+  // phone PWA and the agents keep talking to it while nothing is on screen.
+  win.on("close", (event) => {
+    if (quitting) return;
+    event.preventDefault();
+    win.hide();
+  });
+}
+
+let quitting = false;
+let tray = null;
+
+function showWindow() {
+  const win = BrowserWindow.getAllWindows()[0];
+  if (!win) return createWindow();
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
+function createTray() {
+  tray = new Tray(path.join(__dirname, "public", "icon.ico"));
+  tray.setToolTip("Review Board");
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: "Open", click: showWindow },
+      { label: "Quit", click: () => { quitting = true; app.quit(); } },
+    ])
+  );
+  tray.on("click", showWindow);
 }
 
 // Single-instance: a second launch focuses the existing window instead of crashing on EADDRINUSE.
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
-    const win = BrowserWindow.getAllWindows()[0];
-    if (win) {
-      if (win.isMinimized()) win.restore();
-      win.focus();
-    }
-  });
+  app.on("second-instance", showWindow);
 
   app.whenReady().then(() => {
     startServer();
     createWindow();
+    createTray();
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
   });
 }
 
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
-});
+// No quit on "window-all-closed": the server outlives the window; Quit lives in the tray menu.
