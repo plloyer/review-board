@@ -188,7 +188,7 @@ function card(msg) {
   el.querySelectorAll(".pending-row").forEach((row) => renderPendingChips(row, row.dataset.pendingKey));
 
   el.querySelectorAll(".thumb").forEach((img) =>
-    img.addEventListener("click", () => openLightbox(img.src, msg.id, msg.status !== "answered"))
+    img.addEventListener("click", () => openLightbox(img.src, msg.id, msg.status !== "answered", galleryOf(el)))
   );
   el.querySelectorAll(".growable-text").forEach((ta) => ta.addEventListener("input", () => autoGrow(ta)));
 
@@ -390,9 +390,18 @@ async function uploadDataUrl(dataUrl, filename) {
 
 // ponytail: single freehand red pen, no color/shape picker, no undo — add if it's
 // ever not enough for pointing at the thing in the screenshot.
-function openLightbox(src, msgId, annotatable) {
+// Every image a card or overlay shows, in document order: the set the lightbox
+// arrows cycle through when one of them is opened.
+function galleryOf(root) {
+  return [...root.querySelectorAll(".thumb, .thread img")].map((i) => i.src);
+}
+
+function openLightbox(src, msgId, annotatable, gallery = []) {
   const overlay = document.createElement("div");
   overlay.className = "lightbox";
+
+  const srcs = gallery.includes(src) && gallery.length > 1 ? gallery : [src];
+  let index = srcs.indexOf(src);
 
   const wrap = document.createElement("div");
   wrap.className = "lightbox-wrap";
@@ -476,6 +485,31 @@ function openLightbox(src, msgId, annotatable) {
   wrap.addEventListener("dblclick", () => {
     if (!annotateOn) resetTransform();
   });
+
+  // Left/right arrows (keys or the on-screen buttons) step through the card's
+  // images; a pending annotation does not follow, the canvas is redrawn blank
+  // for the new image by sizeCanvasBuffer on load.
+  if (srcs.length > 1) {
+    const nav = document.createElement("div");
+    nav.className = "lightbox-nav";
+    nav.innerHTML = `<button class="lightbox-prev" aria-label="Previous">‹</button><span class="lightbox-counter"></span><button class="lightbox-next" aria-label="Next">›</button>`;
+    nav.addEventListener("click", (e) => e.stopPropagation());
+    overlay.appendChild(nav);
+    const counter = nav.querySelector(".lightbox-counter");
+    const show = (i) => {
+      index = (i + srcs.length) % srcs.length;
+      img.src = srcs[index];
+      resetTransform();
+      counter.textContent = `${index + 1} / ${srcs.length}`;
+    };
+    nav.querySelector(".lightbox-prev").addEventListener("click", () => show(index - 1));
+    nav.querySelector(".lightbox-next").addEventListener("click", () => show(index + 1));
+    onWindow("keydown", (e) => {
+      if (e.key === "ArrowRight") show(index + 1);
+      else if (e.key === "ArrowLeft") show(index - 1);
+    });
+    counter.textContent = `${index + 1} / ${srcs.length}`;
+  }
 
   const touchDist = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
   const touchMid = (a, b) => ({ x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 });
@@ -690,7 +724,7 @@ function sentCard(msg, delivered) {
         if (!/^(https?:|data:|\/api\/image)/i.test(src)) img.src = imgSrc(src);
         img.addEventListener("click", (e) => {
           e.stopPropagation();
-          openLightbox(img.src, commentKey, true);
+          openLightbox(img.src, commentKey, true, galleryOf(el));
         });
       });
       el.querySelectorAll(".thread video").forEach((v) => {
@@ -723,7 +757,7 @@ function sentCard(msg, delivered) {
     const thumb = e.target.closest(".thumb");
     if (thumb) {
       // Annotations drawn here ride along with the card's next comment.
-      openLightbox(thumb.src, commentKey, true);
+      openLightbox(thumb.src, commentKey, true, galleryOf(el));
       return;
     }
     if (e.target.closest(".archive-link")) {
@@ -938,7 +972,8 @@ function compactCard(msg, blockedInfo) {
       openLightbox(
         thumb.src,
         msg.direction === "agent" ? msg.id : `comment:${msg.id}`,
-        msg.direction === "agent" ? agentAwaitingDecision(msg) : true
+        msg.direction === "agent" ? agentAwaitingDecision(msg) : true,
+        galleryOf(el)
       );
       return;
     }
@@ -1036,7 +1071,8 @@ function wireOverlayMedia(panel, msg) {
       openLightbox(
         img.src,
         msg.direction === "agent" ? msg.id : `comment:${msg.id}`,
-        msg.direction === "agent" ? agentAwaitingDecision(msg) : true
+        msg.direction === "agent" ? agentAwaitingDecision(msg) : true,
+        galleryOf(panel)
       )
     )
   );
@@ -1045,7 +1081,7 @@ function wireOverlayMedia(panel, msg) {
     if (!/^(https?:|data:|\/api\/image)/i.test(src)) img.src = imgSrc(src);
     img.addEventListener("click", (e) => {
       e.stopPropagation();
-      openLightbox(img.src, `comment:${msg.id}`, true);
+      openLightbox(img.src, `comment:${msg.id}`, true, galleryOf(panel));
     });
   });
   panel.querySelectorAll(".thread video").forEach((v) => {

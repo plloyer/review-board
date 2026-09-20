@@ -212,6 +212,9 @@ header.drag-over { outline: 2px dashed #4a90d9; outline-offset: -2px; }
 .annotate-canvas.active { pointer-events: auto; cursor: crosshair; }
 .lightbox-toolbar { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; z-index: 301; }
 .lightbox-toolbar button.active { background: #ff3b30; border-color: #ff3b30; }
+.lightbox-nav { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; z-index: 301; }
+.lightbox-nav button { width: 44px; height: 44px; padding: 0; font-size: 26px; line-height: 1; border-radius: 50%; background: rgba(40, 40, 44, 0.9); }
+.lightbox-counter { font-size: 12px; color: #b6b6bc; min-width: 44px; text-align: center; }
 .attach-btn { display: inline-flex; align-items: center; padding: 6px 10px; border: 1px solid #555; border-radius: 6px; cursor: pointer; }
 .attach-btn:hover { background: #444; }
 .pending-row { display: flex; gap: 8px; margin-top: 8px; }
