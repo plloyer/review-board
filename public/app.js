@@ -54,10 +54,9 @@ async function submitThreadComment(el, textSelector, key, title, threadMsgId) {
   const text = ta.value.trim();
   const imgs = pendingImages.get(key) || [];
   if (!text && imgs.length === 0) return;
-  const row = el.querySelector(`.pending-row[data-pending-key="${CSS.escape(key)}"]`);
   ta.value = "";
   pendingImages.delete(key);
-  if (row) renderPendingChips(row, key);
+  renderPendingRows(key);
   try {
     await fetchJSON("/api/messages", {
       method: "POST",
@@ -86,7 +85,7 @@ async function submitThreadComment(el, textSelector, key, title, threadMsgId) {
   } catch (err) {
     ta.value = text;
     pendingImages.set(key, imgs);
-    if (row) renderPendingChips(row, key);
+    renderPendingRows(key);
   }
 }
 
@@ -213,9 +212,16 @@ function renderPendingChips(container, key) {
     btn.addEventListener("click", () => {
       const list = pendingImages.get(btn.dataset.key) || [];
       list.splice(Number(btn.dataset.i), 1);
-      renderPendingChips(container, btn.dataset.key);
+      renderPendingRows(btn.dataset.key);
     })
   );
+}
+
+// The same key can have two rows at once: the compact card on the board and
+// the overlay open over it. Painting only the first match leaves the visible
+// one stale (dropped images "not appearing" until the overlay is reopened).
+function renderPendingRows(key) {
+  document.querySelectorAll(`.pending-row[data-pending-key="${CSS.escape(String(key))}"]`).forEach((row) => renderPendingChips(row, key));
 }
 
 function addPendingImage(key, path) {
@@ -225,8 +231,7 @@ function addPendingImage(key, path) {
     renderComposeChips();
     return;
   }
-  const row = document.querySelector(`.pending-row[data-pending-key="${CSS.escape(key)}"]`);
-  if (row) renderPendingChips(row, key);
+  renderPendingRows(key);
 }
 
 // Ctrl+V a screenshot into any of these boxes and it rides along as an attachment,
@@ -610,8 +615,7 @@ async function sendReply(id, body) {
   } catch (err) {
     if (imgs) {
       pendingImages.set(id, imgs);
-      const row = document.querySelector(`.pending-row[data-pending-key="${CSS.escape(String(id))}"]`);
-      if (row) renderPendingChips(row, id);
+      renderPendingRows(id);
     }
     throw err;
   }
