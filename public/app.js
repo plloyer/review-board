@@ -393,15 +393,36 @@ async function uploadDataUrl(dataUrl, filename) {
 // Every image a card or overlay shows, in document order: the set the lightbox
 // arrows cycle through when one of them is opened.
 function galleryOf(root) {
-  return [...root.querySelectorAll(".thumb, .thread img")].map((i) => i.src);
+  return [...root.querySelectorAll(".thumb, .thread img")].map((i) => ({ src: i.src, label: i.alt, caption: i.title }));
 }
 
 function openLightbox(src, msgId, annotatable, gallery = []) {
   const overlay = document.createElement("div");
   overlay.className = "lightbox";
 
-  const srcs = gallery.includes(src) && gallery.length > 1 ? gallery : [src];
-  let index = srcs.indexOf(src);
+  const found = gallery.findIndex((g) => g.src === src);
+  const entries = found >= 0 ? gallery : [{ src, label: "", caption: "" }];
+  const srcs = entries.map((g) => g.src);
+  let index = Math.max(0, found);
+
+  // Label ("Before") and caption (what the image shows) over the image, so
+  // the human knows what he is looking at; hidden when the agent gave none.
+  const captionEl = document.createElement("div");
+  captionEl.className = "lightbox-caption";
+  const paintCaption = () => {
+    const { label, caption } = entries[index];
+    captionEl.hidden = !label && !caption;
+    captionEl.replaceChildren();
+    if (label) {
+      const strong = document.createElement("strong");
+      strong.textContent = label;
+      captionEl.appendChild(strong);
+    }
+    if (label && caption) captionEl.appendChild(document.createTextNode(" \u00b7 "));
+    if (caption) captionEl.appendChild(document.createTextNode(caption));
+  };
+  paintCaption();
+  overlay.appendChild(captionEl);
 
   const wrap = document.createElement("div");
   wrap.className = "lightbox-wrap";
@@ -500,6 +521,7 @@ function openLightbox(src, msgId, annotatable, gallery = []) {
       index = (i + srcs.length) % srcs.length;
       img.src = srcs[index];
       resetTransform();
+      paintCaption();
       counter.textContent = `${index + 1} / ${srcs.length}`;
     };
     nav.querySelector(".lightbox-prev").addEventListener("click", () => show(index - 1));

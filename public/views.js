@@ -21,7 +21,7 @@
 (function () {
 const LocalLifecycle = typeof module !== "undefined" ? require("../shared/lifecycle") : window.Lifecycle;
 const { AGENT_VENDORS } = typeof module !== "undefined" ? require("../shared/agents") : window.Agents;
-const { dotColor, lastThreadEntry, isActionableThreadEntry, unseenActionable, agentAwaitingDecision, awaitingAgent, STATE_LABEL } = LocalLifecycle;
+const { lastThreadEntry, isActionableThreadEntry, unseenActionable, agentAwaitingDecision, awaitingAgent, STATE_LABEL } = LocalLifecycle;
 
 function imgSrc(p) {
   return `/api/image?path=${encodeURIComponent(p)}`;
@@ -118,7 +118,10 @@ function retroHTML(msg) {
 // which key the lightbox off a `comment:<id>` string instead, at the call site.
 function imagesHTML(images, msgId) {
   return (images || [])
-    .map((img) => `<img src="${imgSrc(img.path)}" class="thumb"${msgId != null ? ` data-msg-id="${msgId}"` : ""} />`)
+    .map(
+      (img) =>
+        `<img src="${imgSrc(img.path)}" class="thumb"${msgId != null ? ` data-msg-id="${msgId}"` : ""}${img.label ? ` alt="${esc(img.label)}"` : ""}${img.caption ? ` title="${esc(img.caption)}"` : ""} />`
+    )
     .join("");
 }
 
@@ -212,7 +215,6 @@ function deriveCardCore(msg, { blockedBy = [] } = {}) {
   const { tag: sourceTag, rest: titleRest } = splitSourceTag(msg.summary || msg.title);
   const firstImage = (msg.images || [])[0];
   return {
-    dot: dotColor(msg),
     kindLabel: esc(msg.kind),
     sourceTag,
     sourceChip: sourceChipHTML(sourceTag),
@@ -528,12 +530,10 @@ function deriveSentView(msg, delivered, { pendingCounts } = {}) {
 
 function overlayHeader(msg, blockedBy = []) {
   const core = deriveCardCore(msg, { blockedBy });
-  const dot = core.dot || "#77777d";
   const kindBadge = msg.direction === "agent" ? `<span class="kind-badge">${core.kindLabel}</span>` : "";
   const subtitle = msg.summary ? `<div class="overlay-subtitle">${core.fullTitle}</div>` : "";
   return `
     <div class="overlay-head">
-      <span class="ccard-dot" style="background:${dot}"></span>
       ${core.sourceChip}
       <div class="overlay-title-wrap">
         <strong class="overlay-title">${core.shortTitle}</strong>
@@ -630,6 +630,7 @@ const Views = {
   compactSnippet,
   splitSourceTag,
   sourceChipHTML,
+  imagesHTML,
   renderDetail,
   threadHTML,
   threadTail,

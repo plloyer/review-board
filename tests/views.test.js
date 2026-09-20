@@ -530,3 +530,11 @@ test("deriveCompactView: compact cards no longer carry the colored dot", () => {
   const base = { id: "u1", direction: "human", status: "open", state: "in_progress", title: "T", taskKind: "feedback" };
   assert.equal(Views.deriveCompactView(base).dot, undefined);
 });
+
+test("imagesHTML: label and caption ride on the thumb as alt and title, escaped; absent ones leave no attribute", () => {
+  const html = Views.imagesHTML([{ path: "C:/a.png", label: 'Avant "v1"', caption: "Notre <village>" }, { path: "C:/b.png" }], "r1");
+  assert.match(html, /alt="Avant &quot;v1&quot;"/);
+  assert.match(html, /title="Notre &lt;village&gt;"/);
+  assert.equal((html.match(/alt=/g) || []).length, 1);
+  assert.equal((html.match(/title=/g) || []).length, 1);
+});

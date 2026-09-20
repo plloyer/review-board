@@ -345,10 +345,13 @@ test("send_message succeeds when every images/videos path exists on this machine
   fs.writeFileSync(img, "bytes");
   const res = await client.callTool({
     name: "send_message",
-    arguments: { messages: [{ title: "Look at this", images: [{ path: img }] }] },
+    arguments: { messages: [{ title: "Look at this", images: [{ path: img, label: "Before", caption: "Our settlement at dawn" }] }] },
   });
   assert.equal(res.isError, undefined);
   assert.equal(store.list().length, 1);
+  const stored = store.list()[0].images[0];
+  assert.equal(stored.label, "Before");
+  assert.equal(stored.caption, "Our settlement at dawn");
 });
 
 test("reply_to_message rejects a bare local markdown image path that does not exist, appending no thread entry", async () => {

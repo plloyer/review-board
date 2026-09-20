@@ -122,7 +122,7 @@ function missingTextRefs(text) {
 // Stateless HTTP has no tools/list_changed channel, so the version rides every
 // await_replies trailer instead — a session that connected under an older
 // version learns from the delivery text that its cached tool list is stale.
-const TOOLS_VERSION = "v5"; // v5: agent {vendor, model, effort} required on move_task in_progress, optional on reply_to_message
+const TOOLS_VERSION = "v6"; // v6: images carry label/caption (send_message) and ![label](url "caption") in replies
 
 function buildServer() {
   // The workflow travels with the MCP handshake so every client learns it without
@@ -133,7 +133,7 @@ function buildServer() {
     "Pick work: the human's feedback backlog cards outrank projet tasks. File your own tasks with create_task.",
     "Dependencies: set_blockers / blocked_by on create_task/move_task (blocked until blockers reach landing/closed; you get a \"débloquée\" delivery). Priority: set_priority / priority 0-3 (0 = critical, 1 = highest, then in order).",
     "Start a card: move_task in_progress with agent {vendor, model, effort} (required the first time: it draws who works the card; reply_to_message also takes agent when a card changes hands). Blocked on the human: reply_to_message kind question (auto-moves to questions). Progress notes: kind update (silent).",
-    "Done with real proof (markdown images ![p](/api/image?path=<enc>)): reply_to_message kind done (auto-moves to approbation).",
+    "Done with real proof: reply_to_message kind done (auto-moves to approbation). Every proof image is labelled: ![Before](/api/image?path=<enc> \"one sentence on what it shows\") - alt = short tag (Before / After / Original), quoted title = what the image shows; both appear over the zoomed image.",
     "Entering landing/closed requires the human's approval unless the task was created no_review (create_task no_review: true); closing a card already in landing is free.",
     "Proof files must be readable by the BOARD's machine. Running elsewhere? First POST the bytes: /api/upload {dataUrl, filename} -> {path}, then reference THAT path. A path from your own disk renders as a broken image on his board.",
     "He approves -> merge -> move_task landing. Fix present in the build he runs -> close_issue. Never closed before it is in his build; never close what he has not approved.",
@@ -161,7 +161,16 @@ function buildServer() {
               options: z.array(z.string()).max(8).optional().describe("One-click answers for a question."),
               context: z.string().optional().describe("One line of context."),
               details: z.array(z.string()).optional().describe("Bullet points."),
-              images: z.array(z.object({ path: z.string() })).optional().describe("Absolute local file paths."),
+              images: z
+                .array(
+                  z.object({
+                    path: z.string(),
+                    label: z.string().optional().describe('Short tag shown over the image when zoomed: "Before", "After", "Original", "Target".'),
+                    caption: z.string().optional().describe("One sentence on what the image shows, so the human knows what he is looking at."),
+                  })
+                )
+                .optional()
+                .describe("Absolute local file paths, each with a label and a caption."),
               videos: z.array(z.object({ path: z.string() })).optional().describe("Absolute local video file paths (mp4/webm) — a gameplay/before-after clip."),
               project: z.string().optional(),
             })
@@ -291,7 +300,7 @@ function buildServer() {
     "reply_to_message",
     {
       description:
-        "Reply under the human's message/issue on their board (e.g. \"fixed in <sha>\"). This is how you tell the human an issue they filed is resolved — acknowledge_messages only marks it read, it no longer removes it from their board. Kind 'question' also moves the card to state questions; kind 'done' moves it to approbation. Embedded proof images must use a path readable by the board's machine — from another machine, POST /api/upload {dataUrl, filename} first and reference the returned path. A kind:'done' delivery should carry the worker's retro param — every card needs one before it can close. When the human has approved AND the fix is delivered, finish with close_issue.",
+        "Reply under the human's message/issue on their board (e.g. \"fixed in <sha>\"). This is how you tell the human an issue they filed is resolved — acknowledge_messages only marks it read, it no longer removes it from their board. Kind 'question' also moves the card to state questions; kind 'done' moves it to approbation. Label every embedded image: ![Before](url \"what it shows\") (alt = short tag such as Before / After / Original, quoted title = one sentence), both are shown over the zoomed image. Embedded proof images must use a path readable by the board's machine — from another machine, POST /api/upload {dataUrl, filename} first and reference the returned path. A kind:'done' delivery should carry the worker's retro param — every card needs one before it can close. When the human has approved AND the fix is delivered, finish with close_issue.",
       inputSchema: {
         id: z.string(),
         text: z.string(),
