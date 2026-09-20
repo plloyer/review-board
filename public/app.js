@@ -1139,7 +1139,7 @@ function renderOverlayBody(msg, blockedBy = []) {
   const sameCardDraft = prevTa && panel.dataset.msgId === String(msg.id) ? prevTa.value : "";
 
   const view = deriveOverlayView(msg, { blockedBy, pendingCounts: pendingCountsFor(msg.id) });
-  panel.innerHTML = `${view.headerHTML}<div class="overlay-scroll">${view.bodyHTML}</div><div class="overlay-footer">${view.footerHTML}</div>`;
+  panel.innerHTML = `<div class="overlay-scroll">${view.headerHTML}${view.bodyHTML}</div><div class="overlay-footer">${view.footerHTML}</div>`;
   panel.dataset.sig = JSON.stringify(view);
   panel.dataset.msgId = String(msg.id);
 
@@ -1215,6 +1215,7 @@ function openOverlay(msg, cardEl, opts = {}) {
   const backdrop = document.getElementById("overlayBackdrop");
   const panel = document.getElementById("overlayPanel");
   backdrop.hidden = false;
+  document.body.classList.add("overlay-open");
   renderOverlayBody(msg, opts.blockedBy || []);
 
   // FLIP: jump the (now naturally centered) panel back to the clicked card's
@@ -1247,6 +1248,7 @@ function openOverlay(msg, cardEl, opts = {}) {
 function closeOverlay() {
   openCardId = null;
   document.getElementById("overlayBackdrop").hidden = true;
+  document.body.classList.remove("overlay-open");
   document.removeEventListener("keydown", onOverlayKeydown);
 }
 

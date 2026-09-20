@@ -20,6 +20,11 @@ Mirror on the Hub port. lifecycle.js is untouched; a new shared module carries t
 - Priority pills: P0 `#d67070` on `#2a1212`, P1 `#d79e62` on `#2a1a08`, P2 `#cfb96a` on `#2a2308`, P3 `#77ae89` on `#0f2417`. Same pairs on the overlay priority selector.
 - Column card tints: backlog `#1e1f22` / border `#2e2f33`; in_progress `#1b242f` / `#2b3a4b`; questions `#2c2519` / `#4a3d17`; approbation `#1c2921` / `#3a5a3a`; landing `#25202d` / `#3a2f4d`; closed `#191a1c` / `#2a2b2e` with opacity .9.
 
+## Overlay (phone fix, same commit series)
+
+- The overlay header is rendered inside `.overlay-scroll`, so the whole card scrolls, description included. `.overlay-head` gets `flex-wrap: wrap` and `margin: -16px -18px 16px` to keep its edge-to-edge border inside the padded scroll area; `.overlay-title-wrap` gets `flex-basis: 100%; order: 1` so pills and buttons form the first row and the title plus description take the full width below; `.overlay-close { margin-left: auto }`.
+- `.overlay-scroll { overscroll-behavior: contain }` and `body.overlay-open { overflow: hidden }` (class toggled by openOverlay / closeOverlay) so a touch scroll never reaches the page behind.
+
 ## Assets
 
 `public/agents/claude.svg` (Wikimedia Commons Claude symbol, fill `hsl(14.8, 63.1%, 59.6%)`), `public/agents/codex.png` (ChatGPT mark, 48px, pre-tinted `#ebebeb` on alpha), `public/agents/antigravity.png` (Google press-page icon, 48px, full color). These are third-party trademarks: fine on a personal board, check before shipping them inside the Hub.
