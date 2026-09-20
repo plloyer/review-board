@@ -12,6 +12,7 @@ const {
   RETRO_TEMPLATE_TEXT,
   retroRequiredText,
 } = require("../shared/lifecycle");
+const { AGENT_VENDORS } = require("../shared/agents");
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -78,6 +79,15 @@ function formatDelivered(items) {
 // 3 = lowest, absent = normal/2).
 const PRIORITY_SCHEMA = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]).optional();
 
+const AGENT_SCHEMA = z
+  .object({
+    vendor: z.enum(Object.keys(AGENT_VENDORS)).describe("Which tool runs you: claude (Claude Code), codex (OpenAI Codex), antigravity (Google Antigravity)."),
+    model: z.string().trim().min(1).describe("The model you run on, as the human sees it, e.g. \"Fable 5.1\", \"GPT-5.4\", \"Gemini 3.1 Pro\"."),
+    effort: z.string().optional().describe("Optional: your reasoning effort setting if you have one, e.g. \"max\", \"high\", \"medium\"."),
+  })
+  .optional()
+  .describe("Declare who works on the card: {vendor, model, effort}. Required the first time a card enters in_progress; also accepted when handing a card to another agent.");
+
 // Attachment validation (live incident: a path unreadable on the board machine
 // renders as a broken image/video there, with no signal back to the agent).
 // Checked at the MCP tool boundary, before anything is created/replied — the
@@ -112,7 +122,7 @@ function missingTextRefs(text) {
 // Stateless HTTP has no tools/list_changed channel, so the version rides every
 // await_replies trailer instead — a session that connected under an older
 // version learns from the delivery text that its cached tool list is stale.
-const TOOLS_VERSION = "v4"; // v4: approval/retro gates, no_review, retro params on reply_to_message/close_issue
+const TOOLS_VERSION = "v5"; // v5: agent {vendor, model, effort} required on move_task in_progress, optional on reply_to_message
 
 function buildServer() {
   // The workflow travels with the MCP handshake so every client learns it without
@@ -122,7 +132,7 @@ function buildServer() {
     "Loop: await_replies (at-least-once: acknowledge_messages after reading, or items redeliver; ack = READ, never fixed).",
     "Pick work: the human's feedback backlog cards outrank projet tasks. File your own tasks with create_task.",
     "Dependencies: set_blockers / blocked_by on create_task/move_task (blocked until blockers reach landing/closed; you get a \"débloquée\" delivery). Priority: set_priority / priority 0-3 (0 = critical, 1 = highest, then in order).",
-    "Start a card: move_task in_progress. Blocked on the human: reply_to_message kind question (auto-moves to questions). Progress notes: kind update (silent).",
+    "Start a card: move_task in_progress with agent {vendor, model, effort} (required the first time: it draws who works the card; reply_to_message also takes agent when a card changes hands). Blocked on the human: reply_to_message kind question (auto-moves to questions). Progress notes: kind update (silent).",
     "Done with real proof (markdown images ![p](/api/image?path=<enc>)): reply_to_message kind done (auto-moves to approbation).",
     "Entering landing/closed requires the human's approval unless the task was created no_review (create_task no_review: true); closing a card already in landing is free.",
     "Proof files must be readable by the BOARD's machine. Running elsewhere? First POST the bytes: /api/upload {dataUrl, filename} -> {path}, then reference THAT path. A path from your own disk renders as a broken image on his board.",
@@ -297,9 +307,10 @@ function buildServer() {
           .describe(
             "Only honored with kind 'done'. Attach the worker's retrospective at delivery time, while the subagent that did the work can still be asked for it."
           ),
+        agent: AGENT_SCHEMA,
       },
     },
-    async ({ id, text, kind, retro }) => {
+    async ({ id, text, kind, retro, agent }) => {
       // Validated before agentReply so a rejected call has no side effects at
       // all — nothing stored, no reply recorded (a "done" retro attached to a
       // silent "update" would be premature; see stateAfterAgentReply).
@@ -316,7 +327,7 @@ function buildServer() {
       }
       const missing = missingTextRefs(text);
       if (missing.length) return { isError: true, content: [{ type: "text", text: attachmentErrorText(missing) }] };
-      store.agentReply(id, text, kind, { retro });
+      store.agentReply(id, text, kind, { retro, agent });
       return { content: [{ type: "text", text: `Replied to ${id}` }] };
     }
   );
@@ -393,17 +404,18 @@ function buildServer() {
     "move_task",
     {
       description:
-        "Move a task through the board: backlog -> in_progress (you started) -> questions (you need the human — prefer asking via reply_to_message kind question, which moves it automatically) -> approbation (done, proof attached, awaiting his approval) -> landing (approved AND merged) -> closed (present in the build he runs). Entering landing/closed requires the human's approval unless the task was created no_review; landing -> closed is free. Optional note lands in the thread.",
+        "Move a task through the board: backlog -> in_progress (you started) -> questions (you need the human — prefer asking via reply_to_message kind question, which moves it automatically) -> approbation (done, proof attached, awaiting his approval) -> landing (approved AND merged) -> closed (present in the build he runs). Entering landing/closed requires the human's approval unless the task was created no_review; landing -> closed is free. Optional note lands in the thread. Entering in_progress requires agent {vendor, model, effort} unless the card already carries one.",
       inputSchema: {
         id: z.string(),
         state: z.enum(store.TASK_STATES),
         note: z.string().optional(),
         blocked_by: z.array(z.string()).optional().describe("Replaces this card's blockers (ids); empty list unblocks."),
         priority: PRIORITY_SCHEMA,
+        agent: AGENT_SCHEMA,
       },
     },
-    async ({ id, state, note, blocked_by, priority }) => {
-      store.moveTask(id, state, note, { blockedBy: blocked_by, priority, actor: "agent" });
+    async ({ id, state, note, blocked_by, priority, agent }) => {
+      store.moveTask(id, state, note, { blockedBy: blocked_by, priority, actor: "agent", agent });
       return { content: [{ type: "text", text: `Moved ${id} to ${state}` }] };
     }
   );

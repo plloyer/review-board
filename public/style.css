@@ -105,16 +105,21 @@ button:hover { background: #444; }
 /* ---------- Compact card ---------- */
 .ccard { background: #1d1d20; border: 1px solid #33333a; border-radius: 10px; padding: 9px 12px; cursor: pointer; }
 .ccard.drag-over { outline: 2px dashed #4a90d9; outline-offset: -2px; }
-#col-backlog .ccard, #cards-backlog .ccard { background: #1a1f1a; border-color: #2b3a2b; }
-#col-questions .ccard { background: #221d14; border-color: #4a3d17; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4); }
-#col-approbation .ccard { background: #1a1f1a; border-color: #3a5a3a; }
-#col-landing .ccard { background: #1e1a24; border-color: #3a2f4d; }
-#col-closed .ccard { opacity: 0.9; }
+#col-backlog .ccard, #cards-backlog .ccard { background: #1e1f22; border-color: #2e2f33; }
+#col-in_progress .ccard { background: #1b242f; border-color: #2b3a4b; }
+#col-questions .ccard { background: #2c2519; border-color: #4a3d17; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4); }
+#col-approbation .ccard { background: #1c2921; border-color: #3a5a3a; }
+#col-landing .ccard { background: #25202d; border-color: #3a2f4d; }
+#col-closed .ccard { background: #191a1c; border-color: #2a2b2e; opacity: 0.9; }
 .ccard.blocked { opacity: 0.55; }
 @keyframes rb-flash { 0%, 100% { box-shadow: none; } 30% { box-shadow: 0 0 0 2px #d9a441; } }
 .ccard.flash { animation: rb-flash 1s ease; }
 .ccard-row { display: flex; align-items: center; gap: 8px; }
-.ccard-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+/* The priority pill and the agent mark share one 22px gutter so the title and
+   the grey sub text start on the same vertical line. */
+.ccard .chip-prio { width: 22px; padding: 1px 0; text-align: center; }
+.agent-mark { position: absolute; left: 0; top: 0; width: 22px; height: 15px; display: flex; align-items: center; justify-content: center; }
+.agent-mark img { width: 14px; height: 14px; }
 /* The title is the most informative line on the card — give it up to 2 lines
    before clipping instead of squeezing it onto one. */
 .ccard-title { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; line-height: 1.35; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
@@ -124,10 +129,10 @@ button:hover { background: #444; }
 .chip-change-request { background: #3a2b45; color: #b08fd9; }
 .chip-source { background: #2e3b45; color: #9db8c9; }
 .source-tag { font-size: 10px; color: #77777d; flex-shrink: 0; letter-spacing: 0.03em; }
-.chip-p0 { background: #6b1414; color: #ff9d9d; }
-.chip-p1 { background: #4a2323; color: #e08a8a; }
-.chip-p2 { background: #2c2c30; color: #6e6e74; }
-.chip-p3 { background: #333338; color: #8a8a90; }
+.chip-p0 { background: #d67070; color: #2a1212; }
+.chip-p1 { background: #d79e62; color: #2a1a08; }
+.chip-p2 { background: #cfb96a; color: #2a2308; }
+.chip-p3 { background: #77ae89; color: #0f2417; }
 .blocked-badge { font-size: 10px; padding: 1px 6px; border-radius: 4px; background: #3a352b; color: #b0a888; cursor: pointer; }
 /* Human-only priority triage (overlay, backlog cards only) — discreet, same
    chip-pN palette as the pill it replaces so the active state looks familiar. */
@@ -135,22 +140,24 @@ button:hover { background: #444; }
 .prio-select .prio-set { font-size: 10px; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; border: 1px solid #444; background: #2c2c30; color: #6e6e74; }
 .prio-select .prio-set:hover { background: #38383d; }
 .prio-select .prio-set.active { border-color: transparent; }
-.prio-select .prio-set.chip-p0 { background: #6b1414; color: #ff9d9d; }
-.prio-select .prio-set.chip-p1 { background: #4a2323; color: #e08a8a; }
-.prio-select .prio-set.chip-p2 { background: #2c2c30; color: #6e6e74; }
-.prio-select .prio-set.chip-p3 { background: #333338; color: #8a8a90; }
+.prio-select .prio-set.chip-p0 { background: #d67070; color: #2a1212; }
+.prio-select .prio-set.chip-p1 { background: #d79e62; color: #2a1a08; }
+.prio-select .prio-set.chip-p2 { background: #cfb96a; color: #2a2308; }
+.prio-select .prio-set.chip-p3 { background: #77ae89; color: #0f2417; }
 .blocked-row { margin-top: 4px; }
 .ccard .mini-thumb { width: 44px; height: 28px; object-fit: cover; border-radius: 4px; flex-shrink: 0; cursor: zoom-in; }
-/* Body text stays neutral even in tinted cards — the accent lives in the dot,
-   the column header, and the ❓/✅ glyphs; colored-text-on-colored-background
+/* Body text stays neutral even in tinted cards — the accent lives in the column
+   tint, the column header, and the ❓/✅ glyphs; colored-text-on-colored-background
    is tiring to read. */
 /* Capped at 2 lines — the JS side already caps the text at 200 plain-text
    chars, this is the visual backstop so a long single word/line can't blow
    past the compact card's height. */
 .ccard-sub {
+  position: relative;
+  padding-left: 30px;
+  margin-top: 4px;
   font-size: 11px;
   color: #a0a0a6;
-  margin-top: 4px;
   line-height: 1.4;
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -275,7 +282,7 @@ header.drag-over { outline: 2px dashed #4a90d9; outline-offset: -2px; }
   transform-origin: top left;
 }
 .overlay-head { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid #2a2a2e; flex-shrink: 0; }
-.overlay-head .ccard-dot { width: 10px; height: 10px; }
+.overlay-head .ccard-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 .overlay-title-wrap { flex: 1; min-width: 0; }
 .overlay-title { font-size: 14px; overflow-wrap: anywhere; }
 .overlay-subtitle { font-size: 11px; color: #8a8a90; margin-top: 2px; overflow-wrap: anywhere; }

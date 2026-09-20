@@ -10,6 +10,8 @@ const path = require("path");
 const { Client } = require("@modelcontextprotocol/sdk/client/index.js");
 const { InMemoryTransport } = require("@modelcontextprotocol/sdk/inMemory.js");
 
+const AGENT = { vendor: "claude", model: "Fable 5.1", effort: "max" };
+
 function freshServer() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "review-board-mcp-test-"));
   process.env.REVIEW_BOARD_DATA_DIR = dir;
@@ -54,7 +56,7 @@ test("move_task moves a card and rejects an unknown state", async () => {
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
   const task = store.createTask({ title: "Do the thing" });
-  await client.callTool({ name: "move_task", arguments: { id: task.id, state: "in_progress" } });
+  await client.callTool({ name: "move_task", arguments: { id: task.id, state: "in_progress", agent: AGENT } });
   assert.equal(store.list().find((m) => m.id === task.id).state, "in_progress");
 
   const bad = await client.callTool({ name: "move_task", arguments: { id: task.id, state: "bogus" } });
@@ -188,7 +190,7 @@ test("the approved human-direction workflow lands: create_task -> done -> Approu
   const client = await connectedClient(mcp);
   await client.callTool({ name: "create_task", arguments: { title: "wire the menu", context: "c" } });
   const task = store.list().find((m) => m.title === "wire the menu");
-  await client.callTool({ name: "move_task", arguments: { id: task.id, state: "in_progress" } });
+  await client.callTool({ name: "move_task", arguments: { id: task.id, state: "in_progress", agent: AGENT } });
   store.agentReply(task.id, "done, proof attached", "done");
   store.humanThreadNote(task.id, "Approuvé ✅");
   // An agent progress note after the approval must not cancel it.
@@ -213,7 +215,7 @@ test("create_task/move_task accept blocked_by and priority; set_blockers/set_pri
   assert.equal(dep.priority, 1);
 
   const other = store.createTask({ title: "Other" });
-  await client.callTool({ name: "move_task", arguments: { id: other.id, state: "in_progress", blocked_by: [blocker.id], priority: 3 } });
+  await client.callTool({ name: "move_task", arguments: { id: other.id, state: "in_progress", agent: AGENT, blocked_by: [blocker.id], priority: 3 } });
   const movedOther = store.list().find((m) => m.id === other.id);
   assert.deepEqual(movedOther.blockedBy, [blocker.id]);
   assert.equal(movedOther.priority, 3);
@@ -262,7 +264,7 @@ test("move_task to landing on a normal in_progress card returns the instructive 
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
   const task = store.createTask({ title: "Do the thing" });
-  await client.callTool({ name: "move_task", arguments: { id: task.id, state: "in_progress" } });
+  await client.callTool({ name: "move_task", arguments: { id: task.id, state: "in_progress", agent: AGENT } });
 
   const res = await client.callTool({ name: "move_task", arguments: { id: task.id, state: "landing" } });
   assert.equal(res.isError, true);
@@ -276,7 +278,7 @@ test("move_task to landing succeeds for a no_review card", async () => {
   const client = await connectedClient(mcp);
   const created = await client.callTool({ name: "create_task", arguments: { title: "Trivial task", no_review: true } });
   const id = created.content[0].text;
-  await client.callTool({ name: "move_task", arguments: { id, state: "in_progress" } });
+  await client.callTool({ name: "move_task", arguments: { id, state: "in_progress", agent: AGENT } });
 
   const res = await client.callTool({ name: "move_task", arguments: { id, state: "landing" } });
   assert.equal(res.isError, undefined);
@@ -427,4 +429,48 @@ test("recent_history also finds a live (never-archived) delivered item", async (
   const res = await client.callTool({ name: "recent_history", arguments: { minutes: 30 } });
   const text = res.content.map((b) => b.text).join("\n");
   assert.match(text, /Review this/);
+});
+
+test("move_task in_progress requires the agent declaration and stores it", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const task = store.createTask({ title: "T" });
+  const missing = await client.callTool({ name: "move_task", arguments: { id: task.id, state: "in_progress" } });
+  assert.equal(missing.isError, true);
+  assert.match(missing.content[0].text, /agent/);
+  assert.equal(store.list().find((m) => m.id === task.id).state, "backlog");
+
+  const ok = await client.callTool({ name: "move_task", arguments: { id: task.id, state: "in_progress", agent: AGENT } });
+  assert.equal(ok.isError, undefined, ok.content?.[0]?.text);
+  assert.deepEqual(store.list().find((m) => m.id === task.id).agent, AGENT);
+
+  const bad = await client.callTool({
+    name: "move_task",
+    arguments: { id: task.id, state: "questions", agent: { vendor: "skynet", model: "T-800" } },
+  });
+  assert.equal(bad.isError, true);
+  const blank = await client.callTool({ name: "move_task", arguments: { id: task.id, state: "questions", agent: { vendor: "codex", model: "   " } } });
+  assert.equal(blank.isError, true);
+  const after = store.list().find((m) => m.id === task.id);
+  assert.equal(after.state, "in_progress");
+  assert.deepEqual(after.agent, AGENT, "a rejected declaration must not touch the card");
+
+  // Re-entry (the human refused the delivery) needs no new declaration.
+  store.agentReply(task.id, "done", "done");
+  const back = await client.callTool({ name: "move_task", arguments: { id: task.id, state: "in_progress", priority: 1 } });
+  assert.equal(back.isError, undefined, back.content?.[0]?.text);
+  assert.equal(store.list().find((m) => m.id === task.id).state, "in_progress");
+});
+
+test("reply_to_message accepts an agent declaration when a card changes hands", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const task = store.createTask({ title: "T" });
+  await client.callTool({ name: "move_task", arguments: { id: task.id, state: "in_progress", agent: AGENT } });
+  const res = await client.callTool({
+    name: "reply_to_message",
+    arguments: { id: task.id, text: "taking over", agent: { vendor: "antigravity", model: "Gemini 3.1 Pro", effort: "medium" } },
+  });
+  assert.equal(res.isError, undefined, res.content?.[0]?.text);
+  assert.equal(store.list().find((m) => m.id === task.id).agent.vendor, "antigravity");
 });

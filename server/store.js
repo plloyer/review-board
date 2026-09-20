@@ -12,6 +12,7 @@ const {
   agentApprovalRequiredText,
   retroRequiredText,
 } = require("../shared/lifecycle");
+const { agentRequiredText } = require("../shared/agents");
 
 // ponytail: flat JSON file + in-memory array, single local user, no DB needed.
 const DATA_DIR = process.env.REVIEW_BOARD_DATA_DIR || path.join(__dirname, "..", "data");
@@ -297,7 +298,7 @@ function createChangeRequest({ title, details }) {
 // (same shape agentReply appends) and/or replacing its blockers/priority. Works
 // on any card id, human or agent-created.
 function moveTask(id, newState, note, opts = {}) {
-  const { blockedBy, priority, actor = "human" } = opts;
+  const { blockedBy, priority, actor = "human", agent } = opts;
   if (!TASK_STATES.includes(newState)) throw new Error(`Unknown state ${newState}`);
   const msg = state.messages.find((m) => m.id === id);
   if (!msg) throw new Error(`No message ${id}`);
@@ -320,6 +321,16 @@ function moveTask(id, newState, note, opts = {}) {
   if (actor === "agent" && newState === "closed" && !msg.retro) {
     throw new Error(retroRequiredText(id));
   }
+
+  // The board draws who works a card; an agent entering in_progress declares
+  // itself unless the card already carries a declaration (re-entry after a refusal).
+  if (actor === "agent" && newState === "in_progress" && !agent && !msg.agent) {
+    throw new Error(agentRequiredText(id));
+  }
+
+  // Validated before any mutation below: a bad blocker id must not leave a
+  // half-moved card in memory.
+  const blockers = blockedBy !== undefined ? assignBlockers(id, blockedBy) : undefined;
 
   // Snapshot dependents' blocked status BEFORE this card's state changes, so an
   // entry into landing/closed can be told apart from a no-op re-move.
@@ -344,8 +355,12 @@ function moveTask(id, newState, note, opts = {}) {
     if (!msg.readAt) msg.readAt = now;
   }
   if (note) msg.thread = [...(msg.thread || []), { from: "agent", text: note, kind: "update", at: new Date().toISOString() }];
-  if (blockedBy !== undefined) msg.blockedBy = assignBlockers(id, blockedBy);
+  if (blockers !== undefined) msg.blockedBy = blockers;
   if (priority !== undefined) msg.priority = priority;
+  // Back in backlog nobody works the card; elsewhere the last declaration stays
+  // (a closed card still tells who did the work).
+  if (newState === "backlog") delete msg.agent;
+  if (agent) msg.agent = agent;
 
   if (newState === "landing" || newState === "closed") queueUnblockNotices(dependents, wasBlocked);
 
@@ -515,7 +530,7 @@ function mergeRetro(msg, text) {
 // transition (question -> questions, done -> approbation, update -> no move) so
 // callers (mcp.js) don't have to — the transition policy lives here, once.
 function agentReply(id, text, kind = "update", opts = {}) {
-  const { retro } = opts;
+  const { retro, agent } = opts;
   const msg = state.messages.find((m) => m.id === id);
   if (!msg) throw new Error(`No message ${id}`);
   if (msg.direction !== "human") throw new Error(`Message ${id} is not a human message`);
@@ -530,6 +545,7 @@ function agentReply(id, text, kind = "update", opts = {}) {
   // work, while they're still around to write it) — a "question"/"update" retro
   // param would be premature and is silently ignored.
   if (kind === "done" && retro) mergeRetro(msg, retro);
+  if (agent) msg.agent = agent;
   save(state);
   emitChange();
   return msg;
@@ -584,6 +600,7 @@ function reopen(id, note) {
     throw new Error(`${id} can't be reopened from state "${msg.state}" — only a closed or landing card can be reopened`);
   }
   msg.state = "backlog";
+  delete msg.agent;
   if (msg.direction === "agent") {
     if (msg.reply) msg.reply.decision = undefined;
     // Mirrors moveTask's re-ask path: an answered card sent backward becomes

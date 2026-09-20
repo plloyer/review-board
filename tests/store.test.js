@@ -7,6 +7,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const Lifecycle = require("../shared/lifecycle");
+const AGENT = { vendor: "claude", model: "Fable 5.1", effort: "max" };
 
 function freshStore() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "review-board-test-"));
@@ -794,11 +795,26 @@ test("moveTask(actor 'agent') refuses landing/closed on a normal card, with an i
   assert.equal(store.list().find((m) => m.id === task.id).state, "in_progress", "refused move must leave state untouched");
 });
 
-test("moveTask(actor 'agent') to a non-landing/closed state is never gated", () => {
+test("moveTask(actor 'agent') to a non-landing/closed state is never gated beyond the agent declaration", () => {
   const { store } = freshStore();
   const task = store.createTask({ title: "Do the thing" });
-  const moved = store.moveTask(task.id, "in_progress", null, { actor: "agent" });
+  const moved = store.moveTask(task.id, "in_progress", null, { actor: "agent", agent: AGENT });
   assert.equal(moved.state, "in_progress");
+  assert.equal(store.moveTask(task.id, "questions", null, { actor: "agent" }).state, "questions");
+});
+
+test("moveTask(actor 'agent') into in_progress needs an agent declaration unless the card already carries one", () => {
+  const { store } = freshStore();
+  const task = store.createTask({ title: "Do the thing" });
+  assert.throws(() => store.moveTask(task.id, "in_progress", null, { actor: "agent" }), /agent: \{vendor: "claude"\|"codex"\|"antigravity"/);
+  assert.equal(store.list().find((m) => m.id === task.id).state, "backlog", "refused move must leave state untouched");
+  store.moveTask(task.id, "in_progress", null, { actor: "agent", agent: AGENT });
+  store.agentReply(task.id, "done", "done");
+  // Re-entry after the human refused: the declaration is already on the card.
+  assert.equal(store.moveTask(task.id, "in_progress", null, { actor: "agent" }).state, "in_progress");
+  // The human's own moves are never gated.
+  const other = store.createTask({ title: "Other" });
+  assert.equal(store.moveTask(other.id, "in_progress").state, "in_progress");
 });
 
 test("moveTask default actor ('human', e.g. the web route) is never gated", () => {
@@ -955,3 +971,39 @@ test("gate integration: reopening a previously-approved closed card makes agentM
   assert.equal(Lifecycle.agentMoveNeedsApproval(reopened, "closed"), true, "must re-earn approval after reopen");
 });
 
+test("moveTask and agentReply record the declared agent on the card", () => {
+  const { store } = freshStore();
+  const task = store.createTask({ title: "T" });
+  store.moveTask(task.id, "in_progress", undefined, { agent: { vendor: "claude", model: "Fable 5.1", effort: "max" } });
+  assert.deepEqual(store.list().find((m) => m.id === task.id).agent, { vendor: "claude", model: "Fable 5.1", effort: "max" });
+  store.agentReply(task.id, "handing over", "update", { agent: { vendor: "codex", model: "GPT-5.4", effort: "high" } });
+  assert.deepEqual(store.list().find((m) => m.id === task.id).agent, { vendor: "codex", model: "GPT-5.4", effort: "high" });
+  // A reply without an agent keeps the one already declared.
+  store.agentReply(task.id, "still on it", "update");
+  assert.equal(store.list().find((m) => m.id === task.id).agent.vendor, "codex");
+});
+
+test("moveTask with a bad blocked_by leaves the card untouched: no state, thread or agent change", () => {
+  const { store } = freshStore();
+  const task = store.createTask({ title: "T" });
+  assert.throws(() => store.moveTask(task.id, "in_progress", "starting", { actor: "agent", agent: AGENT, blockedBy: ["nope"] }), /No message nope/);
+  const after = store.list().find((m) => m.id === task.id);
+  assert.equal(after.state, "backlog");
+  assert.equal((after.thread || []).length, 0);
+  assert.equal(after.agent, undefined);
+});
+
+test("a card sent back to backlog (reopen or move) drops its agent: nobody works it any more", () => {
+  const { store } = freshStore();
+  const task = store.createTask({ title: "T", noReview: true });
+  store.moveTask(task.id, "in_progress", null, { actor: "agent", agent: AGENT });
+  store.moveTask(task.id, "backlog");
+  assert.equal(store.list().find((m) => m.id === task.id).agent, undefined);
+
+  store.moveTask(task.id, "in_progress", null, { actor: "agent", agent: AGENT });
+  store.setRetro(task.id, "retro");
+  store.moveTask(task.id, "closed", null, { actor: "agent" });
+  assert.deepEqual(store.list().find((m) => m.id === task.id).agent, AGENT, "a closed card keeps who did the work");
+  store.reopen(task.id);
+  assert.equal(store.list().find((m) => m.id === task.id).agent, undefined);
+});

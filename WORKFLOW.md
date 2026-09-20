@@ -6,7 +6,7 @@ Six states: `backlog` -> `in_progress` -> `questions` -> `approbation` -> `landi
 
 1. `await_replies` blocks until something is deliverable (his replies, his new feedback). Delivery is at-least-once: call `acknowledge_messages` after reading, or the same items come back every call. Acknowledge means READ, never fixed.
 2. Pick work: his `feedback` backlog cards always outrank `projet` tasks. File your own project tasks with `create_task` (they land in backlog). Pass `no_review: true` for a task that legitimately never needs his review before landing.
-3. Starting a card: `move_task(id, "in_progress")`.
+3. Starting a card: `move_task(id, "in_progress", agent: {vendor, model, effort})`. `vendor` is `claude`, `codex` or `antigravity`; the board draws that icon on the card with the model and effort (optional) in its tooltip. Required the first time a card enters `in_progress`; `reply_to_message` also takes `agent` when a card changes hands. A card sent back to `backlog` loses its agent.
 4. Blocked on him: `reply_to_message(id, kind "question")` — moves the card to `questions` automatically. Routine progress notes use kind `update` (silent, no ping).
 5. Done with proof: `reply_to_message(id, kind "done")` — moves it to `approbation`. Attach proof as markdown images/videos in the text (`![proof](/api/image?path=<encoded local path>)`); real screenshots, never claims. Proof files must be readable by the board machine - from another machine, POST /api/upload {dataUrl, filename} first and use the returned path.
 6. He approves (his card replies/notes say so) -> merge, then `move_task(id, "landing")`.

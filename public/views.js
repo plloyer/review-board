@@ -20,6 +20,7 @@
 // everything but the final window.Views assignment private to this file.
 (function () {
 const LocalLifecycle = typeof module !== "undefined" ? require("../shared/lifecycle") : window.Lifecycle;
+const { AGENT_VENDORS } = typeof module !== "undefined" ? require("../shared/agents") : window.Agents;
 const { dotColor, lastThreadEntry, isActionableThreadEntry, unseenActionable, agentAwaitingDecision, awaitingAgent, STATE_LABEL } = LocalLifecycle;
 
 function imgSrc(p) {
@@ -266,9 +267,17 @@ function awaitingApproved(msg) {
 // shorter MCR label the mock calls for.
 const TASK_KIND_CHIP_LABEL = { "change-request": "MCR" };
 
+function agentMarkHTML(agent) {
+  if (!agent || !Object.hasOwn(AGENT_VENDORS, agent.vendor)) return "";
+  const vendor = AGENT_VENDORS[agent.vendor];
+  const lines = [`${vendor.label} · ${agent.model}`];
+  if (agent.effort) lines.push(`Effort : ${agent.effort}`);
+  return `<span class="agent-mark" title="${lines.map(esc).join("&#10;")}"><img src="${vendor.icon}" alt="${vendor.label}"></span>`;
+}
+
 function priorityChipHTML(priority) {
   const n = priority ?? 2; // absent = normal/2
-  return `<span class="chip chip-p${n}">p${n}</span>`;
+  return `<span class="chip chip-prio chip-p${n}">p${n}</span>`;
 }
 
 // Human-only triage control (BACKLOG cards only, in the expanded overlay): four
@@ -333,6 +342,7 @@ function messageFingerprint(msg, extra = {}) {
     msg.status,
     msg.priority,
     msg.taskKind,
+    msg.agent || null,
     msg.blockedBy || null,
     msg.summary,
     msg.title,
@@ -384,13 +394,14 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
   const inputsKey = messageFingerprint(msg, { blockedNow: blockedBy, pendingCounts });
   return memoize(compactCache, msg, inputsKey, () => {
     const core = deriveCardCore(msg, { blockedBy });
-    // feedback/projet chips dropped: the dot color + backlog grouping already
-    // carry that; only the change-request chip stays (semantic, rare).
+    // feedback/projet chips dropped: the "Créée par l'IA" sub line + backlog
+    // grouping already carry that; only the change-request chip stays (semantic, rare).
     const chip =
       msg.state === "backlog" && msg.taskKind === "change-request"
         ? `<span class="chip chip-${msg.taskKind}">${esc(TASK_KIND_CHIP_LABEL[msg.taskKind] || msg.taskKind)}</span>`
         : "";
     const priorityChip = priorityChipHTML(msg.priority);
+    const agentMark = agentMarkHTML(msg.agent);
     const undelivered = msg.direction === "human" && !msg.replyTo && !msg.lastDeliveredAt && !msg.acknowledgedAt;
     const cancelBtn = undelivered ? `<button class="cancel-sent" title="Annuler">×</button>` : "";
 
@@ -402,9 +413,9 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
     if (core.awaitingAgent) {
       const snippet = compactSnippet(awaitingHumanWord(msg));
       return {
-        dot: core.dot,
         chip,
         priorityChip,
+        agentMark,
         sourceChip: core.sourceChip,
         title: core.shortTitle,
         miniThumb: core.miniThumbHTML,
@@ -456,9 +467,9 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
     }
 
     return {
-      dot: core.dot,
       chip,
       priorityChip,
+      agentMark,
       sourceChip: core.sourceChip,
       title: core.shortTitle,
       miniThumb: core.miniThumbHTML,

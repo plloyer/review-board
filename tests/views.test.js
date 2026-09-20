@@ -287,7 +287,7 @@ test("deriveOverlayView: a BACKLOG card shows the four-button priority selector 
   assert.match(view.headerHTML, /id="overlayPrio"/);
   assert.match(view.headerHTML, /data-priority="2"[^>]*>P2</); // rendered as active below
   assert.match(view.headerHTML, /class="prio-set active chip-p2" data-priority="2"/);
-  assert.doesNotMatch(view.headerHTML, /class="chip chip-p2">p2</); // pill absent
+  assert.doesNotMatch(view.headerHTML, /class="chip chip-prio chip-p2">p2</); // pill absent
   for (const n of [0, 1, 3]) assert.doesNotMatch(view.headerHTML, new RegExp(`prio-set active chip-p${n}`));
 
   const p0 = Views.deriveOverlayView({ ...backlog, id: "u31", priority: 0 });
@@ -298,7 +298,7 @@ test("deriveOverlayView: a BACKLOG card shows the four-button priority selector 
 test("deriveOverlayView: a non-backlog card keeps the plain priority pill, no selector", () => {
   const inProgress = { id: "u32", direction: "human", state: "in_progress", title: "T", images: [], priority: 1 };
   const view = Views.deriveOverlayView(inProgress);
-  assert.match(view.headerHTML, /chip chip-p1">p1</);
+  assert.match(view.headerHTML, /chip chip-prio chip-p1">p1</);
   assert.doesNotMatch(view.headerHTML, /overlayPrio/);
   assert.doesNotMatch(view.headerHTML, /prio-set/);
 });
@@ -392,6 +392,7 @@ test("messageFingerprint changes for every field any surface renders — the sta
     status: "answered",
     priority: 1,
     taskKind: "change-request",
+    agent: { vendor: "codex", model: "GPT-5.4" },
     title: "T2",
     summary: "S2",
     context: "ctx2",
@@ -501,4 +502,31 @@ test("deriveCompactView: a blocked card that awaits the human's input keeps the 
   const working = { ...question, id: "u4", state: "in_progress" };
   assert.equal(Views.deriveCompactView(working, { blockedBy: ["u9"] }).dimmed, true);
   assert.equal(Views.deriveCompactView(working, { blockedBy: [] }).dimmed, false);
+});
+
+test("deriveCompactView: agent mark with vendor icon and model/effort tooltip; none without a declared agent", () => {
+  const base = { id: "u1", direction: "human", status: "open", state: "in_progress", title: "T" };
+  assert.equal(Views.deriveCompactView(base).agentMark, "");
+  const view = Views.deriveCompactView({ ...base, agent: { vendor: "claude", model: "Fable 5.1", effort: "max" } });
+  assert.match(view.agentMark, /class="agent-mark"/);
+  assert.match(view.agentMark, /src="agents\/claude\.svg"/);
+  assert.match(view.agentMark, /title="Claude · Fable 5\.1&#10;Effort : max"/);
+  const noEffort = Views.deriveCompactView({ ...base, id: "u2", agent: { vendor: "codex", model: "GPT-5.4" } });
+  assert.match(noEffort.agentMark, /src="agents\/codex\.png"/);
+  assert.match(noEffort.agentMark, /title="Codex · GPT-5\.4"/);
+  // Changing the agent must not be hidden by the memo cache.
+  const changed = Views.deriveCompactView({ ...base, agent: { vendor: "antigravity", model: "Gemini 3.1 Pro", effort: "medium" } });
+  assert.match(changed.agentMark, /antigravity\.png/);
+  // Unknown vendors draw nothing, prototype names included (hand-edited data).
+  assert.equal(Views.deriveCompactView({ ...base, id: "u3", agent: { vendor: "constructor", model: "x" } }).agentMark, "");
+});
+
+test("priorityChipHTML: the pill carries the chip-prio class the 22px gutter is styled on", () => {
+  const base = { id: "u1", direction: "human", status: "open", state: "backlog", title: "T" };
+  assert.match(Views.deriveCompactView(base).priorityChip, /class="chip chip-prio chip-p2"/);
+});
+
+test("deriveCompactView: compact cards no longer carry the colored dot", () => {
+  const base = { id: "u1", direction: "human", status: "open", state: "in_progress", title: "T", taskKind: "feedback" };
+  assert.equal(Views.deriveCompactView(base).dot, undefined);
 });

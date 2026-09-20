@@ -822,18 +822,17 @@ function compactCard(msg, blockedInfo) {
 
   el.innerHTML = `
     <div class="ccard-row">
-      ${view.dot ? `<span class="ccard-dot" style="background:${view.dot}"></span>` : ""}
-      ${view.chip}
       ${view.priorityChip}
       <span class="ccard-title">${view.title}</span>
+      ${view.chip}
       ${view.miniThumb}
       ${view.cancelBtn}
       ${view.marker || ""}
     </div>
     ${view.blockedBadge ? `<div class="blocked-row">${view.blockedBadge}</div>` : ""}
     ${
-      view.sub || view.sourceChip
-        ? `<div class="ccard-sub ${view.sub ? view.sub.cls : ""}">${view.sourceChip ? `${view.sourceChip}${view.sub ? " · " : ""}` : ""}${view.sub ? view.sub.text : ""}</div>`
+      view.sub || view.sourceChip || view.agentMark
+        ? `<div class="ccard-sub ${view.sub ? view.sub.cls : ""}">${view.agentMark}${view.sourceChip ? `${view.sourceChip}${view.sub ? " · " : ""}` : ""}${view.sub ? view.sub.text : ""}</div>`
         : ""
     }
     ${view.actionsHTML}
