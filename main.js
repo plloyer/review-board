@@ -6,7 +6,7 @@ const url = require("url");
 const { createApp } = require("./server/web");
 const store = require("./server/store");
 const push = require("./server/push");
-const { isActionableThreadEntry, unseenActionable } = require("./shared/lifecycle");
+const { isActionableThreadEntry, unseenActionable, agentAwaitingDecision } = require("./shared/lifecycle");
 
 // Local-only debugging: lets a CDP client attach to inspect the renderer.
 app.commandLine.appendSwitch("remote-debugging-port", "9222");
@@ -85,12 +85,15 @@ let mainWin = null;
 
 function updateBadge() {
   if (!mainWin || mainWin.isDestroyed()) return;
-  // Something waits on the human: a new agent item, or an unseen actionable
-  // (question/done) AI reply under one of their issues. A routine "update"
-  // entry never lights the badge.
+  // Something waits on the human: an agent card awaiting his decision (a
+  // question or a review, never an FYI note sitting in in_progress), or an
+  // unseen actionable (question/done) AI reply under one of their issues. A
+  // routine "update" entry never lights the badge.
   const pending = store
     .list()
-    .some((m) => (m.direction === "agent" && m.status === "open") || (m.direction === "human" && unseenActionable(m)));
+    .some(
+      (m) => (m.direction === "agent" && m.status === "open" && agentAwaitingDecision(m)) || (m.direction === "human" && unseenActionable(m))
+    );
   if (pending) mainWin.setOverlayIcon(BADGE, "Items waiting for review");
   else mainWin.setOverlayIcon(null, "");
 }
