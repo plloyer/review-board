@@ -477,3 +477,26 @@ test("reply_to_message accepts an agent declaration when a card changes hands", 
   assert.equal(res.isError, undefined, res.content?.[0]?.text);
   assert.equal(store.list().find((m) => m.id === task.id).agent.vendor, "antigravity");
 });
+
+test("reply_to_message rejects a malformed image target even when a quoted title follows it", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const h1 = store.addHumanMessage("bug report", []);
+  const srcDir = fs.mkdtempSync(path.join(os.tmpdir(), "review-board-title-ref-"));
+  const img = path.join(srcDir, "shot.png");
+  fs.writeFileSync(img, "bytes");
+  const enc = encodeURIComponent(img);
+  const res = await client.callTool({
+    name: "reply_to_message",
+    arguments: { id: h1.id, text: `see ![Before]($/api/image?path=${enc} "what it shows")`, kind: "done" },
+  });
+  assert.equal(res.isError, true);
+  assert.ok(res.content[0].text.includes("$/api/image"), res.content[0].text);
+  assert.equal((store.list().find((m) => m.id === h1.id).thread || []).length, 0);
+
+  const ok = await client.callTool({
+    name: "reply_to_message",
+    arguments: { id: h1.id, text: `see ![Before](/api/image?path=${enc} "what it shows")`, kind: "done" },
+  });
+  assert.equal(ok.isError, undefined, ok.content?.[0]?.text);
+});

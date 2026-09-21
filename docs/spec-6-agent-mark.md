@@ -25,6 +25,16 @@ Mirror on the Hub port. lifecycle.js is untouched; a new shared module carries t
 - The overlay header is rendered inside `.overlay-scroll`, so the whole card scrolls, description included. `.overlay-head` gets `flex-wrap: wrap` and `margin: -16px -18px 16px` to keep its edge-to-edge border inside the padded scroll area; `.overlay-title-wrap` gets `flex-basis: 100%; order: 1` so pills and buttons form the first row and the title plus description take the full width below; `.overlay-close { margin-left: auto }`.
 - `.overlay-scroll { overscroll-behavior: contain }` and `body.overlay-open { overflow: hidden }` (class toggled by openOverlay / closeOverlay) so a touch scroll never reaches the page behind.
 
+## Later additions in the same series
+
+- Lightbox: left/right arrow keys and two on-screen buttons step through every image of the card or overlay it was opened from (`galleryOf(root)` collects `.thumb, .thread img`), wrap-around, position counter, pan/zoom reset on each step.
+- Image labels: `send_message` images take `label` (short tag: Before / After / Original / Target) and `caption` (one sentence); rendered as `alt` and `title` on the thumb. Markdown proof uses `![label](url "caption")`. The lightbox prints label and caption in a bar over the image and follows them while stepping. Tools bumped to v6 with the instruction text.
+- Overlay header dot removed; `dot` no longer on the card core (lifecycle `dotColor` untouched).
+- **lifecycle.js change (must mirror byte for byte):** `extractPathRefs` accepts the optional quoted title after a markdown image target: `/!\[[^\]]*\]\(\s*([^)\s]+)(?:\s+"[^"]*")?\s*\)/g`. Without it a malformed target followed by a title slipped past the attachment check.
+- Unavailable-image placeholder prints the offending `src` (truncated, full value in its title) instead of a fixed sentence.
+- Pending image chips repaint every `.pending-row` sharing the key (board card and open overlay), so a drop into the overlay shows up at once.
+- Overlay usable on a phone: header inside the scroll area, pills and buttons on the first row, title full width below; `overscroll-behavior: contain` on the scroll area and `body.overlay-open { overflow: hidden }`.
+
 ## Assets
 
 `public/agents/claude.svg` (Wikimedia Commons Claude symbol, fill `hsl(14.8, 63.1%, 59.6%)`), `public/agents/codex.png` (ChatGPT mark, 48px, pre-tinted `#ebebeb` on alpha), `public/agents/antigravity.png` (Google press-page icon, 48px, full color). These are third-party trademarks: fine on a personal board, check before shipping them inside the Hub.

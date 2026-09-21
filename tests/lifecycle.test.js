@@ -234,3 +234,10 @@ test("activeBlockers: returns only the still-active blocker ids", () => {
   ];
   assert.deepEqual(Lifecycle.activeBlockers(all[0], all), ["u3"]);
 });
+
+test("extractPathRefs reads a markdown image with a quoted title and reports a malformed target", () => {
+  const refs = Lifecycle.extractPathRefs(
+    '![Before](C:/shots/a.png "our farm at dawn") and ![After]($/api/image?path=C%3A%5Cx%5Cb.png "theirs")'
+  );
+  assert.deepEqual(refs, ["C:\\x\\b.png", "C:/shots/a.png", "$/api/image?path=C%3A%5Cx%5Cb.png"]);
+});

@@ -312,7 +312,9 @@ document.addEventListener(
     if (!(img instanceof HTMLImageElement) || !img.closest("#board, #overlayPanel, #blockHistory")) return;
     const ph = document.createElement("span");
     ph.className = "img-missing";
-    ph.textContent = "🖼️ image indisponible — le fichier n'a jamais été téléversé au board";
+    const src = img.getAttribute("src") || "";
+    ph.textContent = `🖼️ image indisponible (${src.length > 60 ? `${src.slice(0, 60)}…` : src})`;
+    ph.title = src;
     img.replaceWith(ph);
   },
   true

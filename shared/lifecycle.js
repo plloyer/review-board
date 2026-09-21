@@ -176,7 +176,8 @@ function extractPathRefs(text) {
       refs.push(decodeURIComponent(m[1]));
     } catch {}
   }
-  for (const m of s.matchAll(/!\[[^\]]*\]\(([^)\s]+)\)/g)) {
+  // Markdown allows a quoted title after the target: ![label](target "title").
+  for (const m of s.matchAll(/!\[[^\]]*\]\(\s*([^)\s]+)(?:\s+"[^"]*")?\s*\)/g)) {
     const target = m[1];
     if (/^(https?:|data:|\/api\/image)/i.test(target)) continue;
     refs.push(target);
