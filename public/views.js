@@ -277,8 +277,14 @@ function agentMarkHTML(agent) {
   return `<span class="agent-mark" title="${lines.map(esc).join("&#10;")}"><img src="${vendor.icon}" alt="${vendor.label}"></span>`;
 }
 
+// Overlay header: one chip per tag. Compact card: a dim word list at the end
+// of the grey line instead, the title line stays clean (PL).
 function tagChipsHTML(tags) {
   return (tags || []).map((t) => `<span class="chip chip-tag">${esc(t)}</span>`).join("");
+}
+
+function tagNoteHTML(tags) {
+  return tags && tags.length ? `<span class="ccard-tags">${tags.map(esc).join(" · ")}</span>` : "";
 }
 
 function priorityChipHTML(priority) {
@@ -409,7 +415,7 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
         : "";
     const priorityChip = priorityChipHTML(msg.priority);
     const agentMark = agentMarkHTML(msg.agent);
-    const tagChips = tagChipsHTML(msg.tags);
+    const tagNote = tagNoteHTML(msg.tags);
     const undelivered = msg.direction === "human" && !msg.replyTo && !msg.lastDeliveredAt && !msg.acknowledgedAt;
     const cancelBtn = undelivered ? `<button class="cancel-sent" title="Annuler">×</button>` : "";
 
@@ -424,7 +430,7 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
         chip,
         priorityChip,
         agentMark,
-        tagChips,
+        tagNote,
         sourceChip: core.sourceChip,
         title: core.shortTitle,
         miniThumb: core.miniThumbHTML,
@@ -479,7 +485,7 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
       chip,
       priorityChip,
       agentMark,
-      tagChips,
+      tagNote,
       sourceChip: core.sourceChip,
       title: core.shortTitle,
       miniThumb: core.miniThumbHTML,

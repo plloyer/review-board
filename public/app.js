@@ -886,7 +886,6 @@ function compactCard(msg, blockedInfo) {
     <div class="ccard-row">
       ${view.priorityChip}
       <span class="ccard-title">${view.title}</span>
-      ${view.tagChips}
       ${view.chip}
       ${view.miniThumb}
       ${view.cancelBtn}
@@ -894,8 +893,8 @@ function compactCard(msg, blockedInfo) {
     </div>
     ${view.blockedBadge ? `<div class="blocked-row">${view.blockedBadge}</div>` : ""}
     ${
-      view.sub || view.sourceChip || view.agentMark
-        ? `<div class="ccard-sub ${view.sub ? view.sub.cls : ""}">${view.agentMark}${view.sourceChip ? `${view.sourceChip}${view.sub ? " · " : ""}` : ""}${view.sub ? view.sub.text : ""}</div>`
+      view.sub || view.sourceChip || view.agentMark || view.tagNote
+        ? `<div class="ccard-sub ${view.sub ? view.sub.cls : ""}">${view.agentMark}<span class="ccard-sub-text">${view.sourceChip ? `${view.sourceChip}${view.sub ? " · " : ""}` : ""}${view.sub ? view.sub.text : ""}</span>${view.tagNote}</div>`
         : ""
     }
     ${view.actionsHTML}

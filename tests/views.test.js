@@ -539,11 +539,15 @@ test("imagesHTML: label and caption ride on the thumb as alt and title, escaped;
   assert.equal((html.match(/title=/g) || []).length, 1);
 });
 
-test("deriveCompactView: tags render as small chips after the title; none without tags", () => {
+test("deriveCompactView: tags render as a dim word list for the grey line, never on the title line; none without tags", () => {
   const base = { id: "u1", direction: "human", status: "open", state: "backlog", title: "T" };
-  assert.equal(Views.deriveCompactView(base).tagChips, "");
+  assert.equal(Views.deriveCompactView(base).tagNote, "");
   const view = Views.deriveCompactView({ ...base, tags: ["linux", "3c-unity"] });
-  assert.match(view.tagChips, /<span class="chip chip-tag">linux<\/span><span class="chip chip-tag">3c-unity<\/span>/);
-  // Tags are part of the memo key: same id, new tags, new chips.
-  assert.match(Views.deriveCompactView({ ...base, tags: ["mac"] }).tagChips, />mac</);
+  assert.equal(view.tagNote, '<span class="ccard-tags">linux · 3c-unity</span>');
+  assert.equal(view.tagChips, undefined);
+  // Tags are part of the memo key: same id, new tags, new note.
+  assert.match(Views.deriveCompactView({ ...base, tags: ["mac"] }).tagNote, />mac</);
+  // The overlay header keeps one chip per tag.
+  const overlay = Views.deriveOverlayView({ ...base, state: "in_progress", tags: ["mac"] });
+  assert.match(overlay.headerHTML, /<span class="chip chip-tag">mac<\/span>/);
 });
