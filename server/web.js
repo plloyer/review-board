@@ -86,13 +86,13 @@ function createApp({ clipboard } = {}) {
 
   web.post("/api/upload", (req, res) => {
     const { dataUrl, filename } = req.body || {};
-    const match = typeof dataUrl === "string" && dataUrl.match(/^data:image\/(\w+);base64,(.+)$/);
-    if (!match) return res.status(400).json({ error: "dataUrl (image) required" });
+    const match = typeof dataUrl === "string" && dataUrl.match(/^data:(image|video)\/(\w+);base64,(.+)$/);
+    if (!match) return res.status(400).json({ error: "dataUrl (image or video) required" });
     const dir = path.join(store.DATA_DIR, "uploads");
     fs.mkdirSync(dir, { recursive: true });
-    const safeName = `${Date.now()}-${(filename || `image.${match[1]}`).replace(/[^a-zA-Z0-9.\-_]/g, "_")}`;
+    const safeName = `${Date.now()}-${(filename || `${match[1]}.${match[2]}`).replace(/[^a-zA-Z0-9.\-_]/g, "_")}`;
     const dest = store.uniqueUploadName(dir, safeName);
-    fs.writeFileSync(dest, Buffer.from(match[2], "base64"));
+    fs.writeFileSync(dest, Buffer.from(match[3], "base64"));
     res.json({ path: dest });
   });
 

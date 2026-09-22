@@ -270,3 +270,23 @@ test("GET /api/clipboard-image rejects a loopback request that carries forwardin
     { clipboard }
   );
 });
+
+test("POST /api/upload accepts a video data url and keeps its extension", async () => {
+  await withServer(async (base) => {
+    const res = await fetch(`${base}/api/upload`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ dataUrl: "data:video/mp4;base64,AAAAIGZ0eXBpc29t", filename: "clip.mp4" }),
+    });
+    assert.equal(res.status, 200);
+    const { path: written } = await res.json();
+    assert.ok(fs.existsSync(written));
+    assert.match(written, /\.mp4$/);
+    const noName = await fetch(`${base}/api/upload`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ dataUrl: "data:video/webm;base64,GkXf" }),
+    });
+    assert.match((await noName.json()).path, /\.webm$/);
+  });
+});

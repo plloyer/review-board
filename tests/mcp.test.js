@@ -513,3 +513,16 @@ test("tags travel through create_task / move_task and show in list_messages", as
   assert.equal(moved.isError, undefined, moved.content?.[0]?.text);
   assert.deepEqual(store.list().find((m) => m.id === id).tags, ["mac"]);
 });
+
+test("await_replies hands a human video attachment to the agent as a path, next to the images", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "review-board-video-"));
+  const clip = path.join(dir, "clip.mp4");
+  fs.writeFileSync(clip, "bytes");
+  store.addHumanMessage("regarde le clip", [{ path: clip }]);
+  const res = await client.callTool({ name: "await_replies", arguments: { timeoutSeconds: 1 } });
+  const texts = res.content.filter((b) => b.type === "text").map((b) => b.text);
+  assert.ok(texts.some((t) => t.includes("attached video: clip.mp4") && t.includes(clip)), texts.join("\n"));
+  assert.ok(!res.content.some((b) => b.type === "image"), "a video is never inlined as an image block");
+});

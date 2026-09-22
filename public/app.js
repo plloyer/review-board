@@ -125,7 +125,7 @@ function card(msg) {
             ${view.isReview ? `<button class="approve-btn">✅ Approve</button>` : ""}
             ${view.options}
             <textarea class="growable-text reply-text" rows="1" placeholder="Comment… (Shift+Enter for a new line, paste an image to attach)"></textarea>
-            <label class="attach-btn">📎<input type="file" accept="image/*" class="attach-input" hidden /></label>
+            <label class="attach-btn">📎<input type="file" accept="image/*,video/*" class="attach-input" hidden /></label>
             <button class="send-reply">Reply</button>
           </div>
           <div class="pending-row" data-pending-key="${msg.id}"></div>`
@@ -199,7 +199,7 @@ function pendingChipsHTML(key) {
   return (pendingImages.get(key) || [])
     .map(
       (p, i) =>
-        `<span class="pending-chip"><img src="${imgSrc(p)}" /><button class="remove-pending" data-key="${key}" data-i="${i}">×</button></span>`
+        `<span class="pending-chip">${window.Views.isVideoPath(p) ? `<video src="${imgSrc(p)}" preload="metadata" muted></video>` : `<img src="${imgSrc(p)}" />`}<button class="remove-pending" data-key="${key}" data-i="${i}">×</button></span>`
     )
     .join("");
 }
@@ -354,7 +354,7 @@ function wireDropToAttach(el, key) {
     el.classList.remove("drag-over");
     const resolvedKey = typeof key === "function" ? key() : key;
     if (!resolvedKey) return;
-    const files = [...(e.dataTransfer?.files || [])].filter((f) => f.type.startsWith("image/"));
+    const files = [...(e.dataTransfer?.files || [])].filter((f) => /^(image|video)\//.test(f.type));
     for (const file of files) {
       const path = await uploadFile(file);
       addPendingImage(resolvedKey, path);

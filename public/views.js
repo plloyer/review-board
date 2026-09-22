@@ -116,11 +116,16 @@ function retroHTML(msg) {
 // (lets the lightbox know which agent card an annotation rides back on) — pass
 // msgId for those; omit it for the human-side surfaces (sentCard/overlayHumanBody),
 // which key the lightbox off a `comment:<id>` string instead, at the call site.
+// The human's attachments share one list; a dropped clip sits in it next to
+// the screenshots and is told apart by its extension.
+const isVideoPath = (p) => /\.(mp4|webm|mov)$/i.test(String(p || ""));
+
 function imagesHTML(images, msgId) {
   return (images || [])
-    .map(
-      (img) =>
-        `<img src="${imgSrc(img.path)}" class="thumb"${msgId != null ? ` data-msg-id="${msgId}"` : ""}${img.label ? ` alt="${esc(img.label)}"` : ""}${img.caption ? ` title="${esc(img.caption)}"` : ""} />`
+    .map((img) =>
+      isVideoPath(img.path)
+        ? `<video class="thumb-video" src="${imgSrc(img.path)}" controls preload="metadata"></video>`
+        : `<img src="${imgSrc(img.path)}" class="thumb"${msgId != null ? ` data-msg-id="${msgId}"` : ""}${img.label ? ` alt="${esc(img.label)}"` : ""}${img.caption ? ` title="${esc(img.caption)}"` : ""} />`
     )
     .join("");
 }
@@ -213,7 +218,7 @@ function sentSubline(msg, delivered, tail) {
 // that needs the full live card list and this stays a pure per-message view).
 function deriveCardCore(msg, { blockedBy = [] } = {}) {
   const { tag: sourceTag, rest: titleRest } = splitSourceTag(msg.summary || msg.title);
-  const firstImage = (msg.images || [])[0];
+  const firstImage = (msg.images || []).find((i) => !isVideoPath(i.path));
   return {
     kindLabel: esc(msg.kind),
     sourceTag,
@@ -457,7 +462,7 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
           ${msg.kind === "review" ? `<button class="approve-btn">✅ Approve</button>` : ""}
           ${optionsHTML(msg.options)}
           <textarea class="growable-text reply-text" rows="1" placeholder="Répondre…"></textarea>
-          <label class="attach-btn">📎<input type="file" accept="image/*" class="attach-input" hidden /></label>
+          <label class="attach-btn">📎<input type="file" accept="image/*,video/*" class="attach-input" hidden /></label>
           <button class="send-reply">Reply</button>
         </div>
         <div class="pending-row" data-pending-key="${msg.id}"></div>`;
@@ -596,7 +601,7 @@ function overlayAgentBody(msg) {
           ${msg.kind === "review" || msg.state === "approbation" ? `<button class="approve-btn">✅ Approuver</button>` : ""}
           ${options}
           <textarea class="growable-text reply-text" rows="1" placeholder="Commenter… (Ctrl+V ou glisse une image)"></textarea>
-          <label class="attach-btn">📎<input type="file" accept="image/*" class="attach-input" hidden /></label>
+          <label class="attach-btn">📎<input type="file" accept="image/*,video/*" class="attach-input" hidden /></label>
           <button class="send-reply">Reply</button>
         </div>
         <div class="pending-row" data-pending-key="${msg.id}"></div>`;
@@ -646,6 +651,7 @@ const Views = {
   splitSourceTag,
   sourceChipHTML,
   imagesHTML,
+  isVideoPath,
   renderDetail,
   threadHTML,
   threadTail,

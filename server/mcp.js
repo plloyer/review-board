@@ -14,6 +14,8 @@ const {
 } = require("../shared/lifecycle");
 const { AGENT_VENDORS } = require("../shared/agents");
 
+const isVideoPath = (p) => /\.(mp4|webm|mov)$/i.test(String(p || ""));
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -48,6 +50,11 @@ function originalName(p) {
 
 function pushImages(blocks, images) {
   for (const img of images || []) {
+    // A video is never inlined; the agent gets the path and reads it itself.
+    if (isVideoPath(img.path)) {
+      blocks.push({ type: "text", text: `attached video: ${originalName(img.path)} (${img.path})` });
+      continue;
+    }
     const block = imageBlock(img.path);
     if (!block) continue;
     blocks.push({ type: "text", text: `attached image: ${originalName(img.path)}` });

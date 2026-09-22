@@ -551,3 +551,11 @@ test("deriveCompactView: tags render as a dim word list for the grey line, never
   const overlay = Views.deriveOverlayView({ ...base, state: "in_progress", tags: ["mac"] });
   assert.match(overlay.headerHTML, /<span class="chip chip-tag">mac<\/span>/);
 });
+
+test("imagesHTML: a video attachment renders as a player, not a broken <img>; the mini thumb skips it", () => {
+  const html = Views.imagesHTML([{ path: "C:/u/clip.mp4" }, { path: "C:/u/shot.png" }], "u1");
+  assert.match(html, /<video class="thumb-video" src="\/api\/image\?path=C%3A%2Fu%2Fclip\.mp4" controls preload="metadata"><\/video>/);
+  assert.match(html, /<img src="\/api\/image\?path=C%3A%2Fu%2Fshot\.png" class="thumb"/);
+  const view = Views.deriveCompactView({ id: "u1", direction: "human", status: "open", state: "backlog", title: "T", images: [{ path: "C:/u/clip.mp4" }] });
+  assert.equal(view.miniThumb, "");
+});
