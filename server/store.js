@@ -158,6 +158,8 @@ function addHumanMessage(text, images, replyTo) {
     status: "open",
     createdAt: new Date().toISOString(),
   };
+  const tags = tagsFromText(text);
+  if (tags) msg.tags = tags;
   // A replyTo message is a delivery vehicle, not a card — it stays out of task-land.
   if (!replyTo) {
     msg.taskKind = "feedback";
@@ -170,6 +172,19 @@ function addHumanMessage(text, images, replyTo) {
 }
 
 const PRIORITIES = [0, 1, 2, 3];
+
+// Tags say who CAN take a card (windows / mac / linux / unity / a machine
+// name); no tag = anyone. Lowercased, deduped; an empty result clears them.
+function normalizeTags(tags) {
+  const out = [...new Set((tags || []).map((t) => String(t).trim().toLowerCase()).filter(Boolean))];
+  return out.length ? out : undefined;
+}
+
+// A human types "#linux" or "#3c-unity" in his text: derived tags, text untouched.
+const TAG_WORD_RE = /(?:^|\s)#([a-z0-9][a-z0-9-]*)\b/gi;
+function tagsFromText(text) {
+  return normalizeTags([...String(text || "").matchAll(TAG_WORD_RE)].map((m) => m[1]));
+}
 
 function validatePriority(priority) {
   if (priority !== undefined && !PRIORITIES.includes(priority)) throw new Error(`Invalid priority ${priority}`);
@@ -237,7 +252,7 @@ function setPriority(id, priority) {
 // (direction "human") purely so the existing thread/seen/archive machinery
 // (agentReply, humanThreadNote, markThreadSeen, archive) works on it unmodified;
 // `createdBy` marks the origin and `taskKind` tells it apart from filed feedback.
-function createTask({ title, context, project, blockedBy, priority, noReview }) {
+function createTask({ title, context, project, blockedBy, priority, noReview, tags }) {
   const id = `u${state.nextHumanId++}`;
   validatePriority(priority);
   const msg = {
@@ -258,6 +273,8 @@ function createTask({ title, context, project, blockedBy, priority, noReview }) 
   };
   if (blockedBy && blockedBy.length) msg.blockedBy = assignBlockers(id, blockedBy);
   if (priority !== undefined) msg.priority = priority;
+  const normalizedTags = normalizeTags(tags);
+  if (normalizedTags) msg.tags = normalizedTags;
   // Opt-out, at creation: some tasks legitimately never need his review before
   // landing/closing (see agentMoveNeedsApproval) — still an ordinary visible card.
   if (noReview) msg.noReview = true;
@@ -298,7 +315,7 @@ function createChangeRequest({ title, details }) {
 // (same shape agentReply appends) and/or replacing its blockers/priority. Works
 // on any card id, human or agent-created.
 function moveTask(id, newState, note, opts = {}) {
-  const { blockedBy, priority, actor = "human", agent } = opts;
+  const { blockedBy, priority, actor = "human", agent, tags } = opts;
   if (!TASK_STATES.includes(newState)) throw new Error(`Unknown state ${newState}`);
   const msg = state.messages.find((m) => m.id === id);
   if (!msg) throw new Error(`No message ${id}`);
@@ -361,6 +378,11 @@ function moveTask(id, newState, note, opts = {}) {
   // (a closed card still tells who did the work).
   if (newState === "backlog") delete msg.agent;
   if (agent) msg.agent = agent;
+  if (tags !== undefined) {
+    const normalized = normalizeTags(tags);
+    if (normalized) msg.tags = normalized;
+    else delete msg.tags;
+  }
 
   if (newState === "landing" || newState === "closed") queueUnblockNotices(dependents, wasBlocked);
 

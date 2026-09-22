@@ -538,3 +538,12 @@ test("imagesHTML: label and caption ride on the thumb as alt and title, escaped;
   assert.equal((html.match(/alt=/g) || []).length, 1);
   assert.equal((html.match(/title=/g) || []).length, 1);
 });
+
+test("deriveCompactView: tags render as small chips after the title; none without tags", () => {
+  const base = { id: "u1", direction: "human", status: "open", state: "backlog", title: "T" };
+  assert.equal(Views.deriveCompactView(base).tagChips, "");
+  const view = Views.deriveCompactView({ ...base, tags: ["linux", "3c-unity"] });
+  assert.match(view.tagChips, /<span class="chip chip-tag">linux<\/span><span class="chip chip-tag">3c-unity<\/span>/);
+  // Tags are part of the memo key: same id, new tags, new chips.
+  assert.match(Views.deriveCompactView({ ...base, tags: ["mac"] }).tagChips, />mac</);
+});

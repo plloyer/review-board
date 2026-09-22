@@ -277,6 +277,10 @@ function agentMarkHTML(agent) {
   return `<span class="agent-mark" title="${lines.map(esc).join("&#10;")}"><img src="${vendor.icon}" alt="${vendor.label}"></span>`;
 }
 
+function tagChipsHTML(tags) {
+  return (tags || []).map((t) => `<span class="chip chip-tag">${esc(t)}</span>`).join("");
+}
+
 function priorityChipHTML(priority) {
   const n = priority ?? 2; // absent = normal/2
   return `<span class="chip chip-prio chip-p${n}">p${n}</span>`;
@@ -345,6 +349,7 @@ function messageFingerprint(msg, extra = {}) {
     msg.priority,
     msg.taskKind,
     msg.agent || null,
+    msg.tags || null,
     msg.blockedBy || null,
     msg.summary,
     msg.title,
@@ -404,6 +409,7 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
         : "";
     const priorityChip = priorityChipHTML(msg.priority);
     const agentMark = agentMarkHTML(msg.agent);
+    const tagChips = tagChipsHTML(msg.tags);
     const undelivered = msg.direction === "human" && !msg.replyTo && !msg.lastDeliveredAt && !msg.acknowledgedAt;
     const cancelBtn = undelivered ? `<button class="cancel-sent" title="Annuler">×</button>` : "";
 
@@ -418,6 +424,7 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
         chip,
         priorityChip,
         agentMark,
+        tagChips,
         sourceChip: core.sourceChip,
         title: core.shortTitle,
         miniThumb: core.miniThumbHTML,
@@ -472,6 +479,7 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
       chip,
       priorityChip,
       agentMark,
+      tagChips,
       sourceChip: core.sourceChip,
       title: core.shortTitle,
       miniThumb: core.miniThumbHTML,
@@ -540,6 +548,7 @@ function overlayHeader(msg, blockedBy = []) {
         ${subtitle}
       </div>
       ${msg.state === "backlog" ? prioritySelectorHTML(msg.priority) : priorityChipHTML(msg.priority)}
+      ${tagChipsHTML(msg.tags)}
       ${kindBadge}
       <span class="overlay-badge">${esc(STATE_LABEL[msg.state] || msg.state)}</span>
       ${msg.state === "closed" ? `<span class="archive-link" id="overlayReopen">Reopen</span>` : ""}

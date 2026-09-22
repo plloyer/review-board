@@ -128,6 +128,7 @@ button:hover { background: #444; }
 .chip-projet { background: #333338; color: #b6b6bc; }
 .chip-change-request { background: #3a2b45; color: #b08fd9; }
 .chip-source { background: #2e3b45; color: #9db8c9; }
+.chip-tag { background: #2e3b45; color: #9db8c9; text-transform: none; }
 .source-tag { font-size: 10px; color: #77777d; flex-shrink: 0; letter-spacing: 0.03em; }
 .chip-p0 { background: #d67070; color: #2a1212; }
 .chip-p1 { background: #d79e62; color: #2a1a08; }

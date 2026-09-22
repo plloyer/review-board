@@ -1007,3 +1007,19 @@ test("a card sent back to backlog (reopen or move) drops its agent: nobody works
   store.reopen(task.id);
   assert.equal(store.list().find((m) => m.id === task.id).agent, undefined);
 });
+
+test("tags: createTask and moveTask store them normalized; a human message derives them from #words in its text", () => {
+  const { store } = freshStore();
+  const task = store.createTask({ title: "T", tags: [" Linux", "3C-Unity", "linux", ""] });
+  assert.deepEqual(store.list().find((m) => m.id === task.id).tags, ["linux", "3c-unity"]);
+  store.moveTask(task.id, "in_progress", null, { actor: "agent", agent: AGENT, tags: ["windows"] });
+  assert.deepEqual(store.list().find((m) => m.id === task.id).tags, ["windows"]);
+  store.moveTask(task.id, "questions", null, { actor: "agent", tags: [] });
+  assert.equal(store.list().find((m) => m.id === task.id).tags, undefined, "an empty list clears the tags");
+
+  const human = store.addHumanMessage("Le menu #Linux plante au boot #3c-unity\n# pas un tag", []);
+  assert.deepEqual(store.list().find((m) => m.id === human.id).tags, ["linux", "3c-unity"]);
+  assert.equal(human.title, "Le menu #Linux plante au boot #3c-unity\n# pas un tag", "the text itself is left alone");
+  const plain = store.addHumanMessage("no tags here", []);
+  assert.equal(plain.tags, undefined);
+});

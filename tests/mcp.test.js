@@ -500,3 +500,16 @@ test("reply_to_message rejects a malformed image target even when a quoted title
   });
   assert.equal(ok.isError, undefined, ok.content?.[0]?.text);
 });
+
+test("tags travel through create_task / move_task and show in list_messages", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const created = await client.callTool({ name: "create_task", arguments: { title: "Build on the Mac", tags: ["mac", "unity"] } });
+  const id = created.content[0].text;
+  assert.deepEqual(store.list().find((m) => m.id === id).tags, ["mac", "unity"]);
+  const res = await client.callTool({ name: "list_messages", arguments: {} });
+  assert.match(res.content[0].text, new RegExp(`\\[${id}\\].*tags: mac,unity`));
+  const moved = await client.callTool({ name: "move_task", arguments: { id, state: "in_progress", agent: AGENT, tags: ["mac"] } });
+  assert.equal(moved.isError, undefined, moved.content?.[0]?.text);
+  assert.deepEqual(store.list().find((m) => m.id === id).tags, ["mac"]);
+});

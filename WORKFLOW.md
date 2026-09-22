@@ -19,6 +19,8 @@ You move cards (`move_task`, or automatically via `reply_to_message`/`close_issu
 
 ## Dependencies & priority
 
+Tags (`tags` on `create_task`/`move_task`, shown by `list_messages` as `tags: a,b`) say who CAN take a card: `windows` / `mac` / `linux` for the OS, `unity` when it needs a Unity pass, a machine name (e.g. `3c-unity`) to force one box. No tag = anyone. Never start a card whose tags exclude your machine. The human tags his own cards by typing `#linux`-style words in the text.
+
 Dependencies: `set_blockers` / `blocked_by` on `create_task`/`move_task` (blocked until blockers reach `landing`/`closed`; you get a "débloquée" delivery). Priority: `set_priority` / `priority` 0-3 (0 = critical, 1 = highest, then in order).
 
 ## Hard rules

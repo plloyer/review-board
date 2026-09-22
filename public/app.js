@@ -886,6 +886,7 @@ function compactCard(msg, blockedInfo) {
     <div class="ccard-row">
       ${view.priorityChip}
       <span class="ccard-title">${view.title}</span>
+      ${view.tagChips}
       ${view.chip}
       ${view.miniThumb}
       ${view.cancelBtn}

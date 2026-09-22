@@ -79,6 +79,15 @@ function formatDelivered(items) {
 // 3 = lowest, absent = normal/2).
 const PRIORITY_SCHEMA = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]).optional();
 
+// Who CAN take a card: an OS (windows / mac / linux), "unity" for a card that
+// needs a Unity pass, or a machine name to force one box. No tag = anyone.
+const TAGS_SCHEMA = z
+  .array(z.string())
+  .optional()
+  .describe(
+    'Who can take the card: "windows" | "mac" | "linux" for the OS, "unity" when it needs a Unity pass, a machine name (e.g. "3c-unity") to force one box. No tag = anyone. On move_task an empty list clears them.'
+  );
+
 const AGENT_SCHEMA = z
   .object({
     vendor: z.enum(Object.keys(AGENT_VENDORS)).describe("Which tool runs you: claude (Claude Code), codex (OpenAI Codex), antigravity (Google Antigravity)."),
@@ -122,7 +131,7 @@ function missingTextRefs(text) {
 // Stateless HTTP has no tools/list_changed channel, so the version rides every
 // await_replies trailer instead — a session that connected under an older
 // version learns from the delivery text that its cached tool list is stale.
-const TOOLS_VERSION = "v6"; // v6: images carry label/caption (send_message) and ![label](url "caption") in replies
+const TOOLS_VERSION = "v7"; // v7: tags on create_task/move_task, shown by list_messages
 
 function buildServer() {
   // The workflow travels with the MCP handshake so every client learns it without
@@ -132,6 +141,7 @@ function buildServer() {
     "Loop: await_replies (at-least-once: acknowledge_messages after reading, or items redeliver; ack = READ, never fixed).",
     "Pick work: the human's feedback backlog cards outrank projet tasks. File your own tasks with create_task.",
     "Dependencies: set_blockers / blocked_by on create_task/move_task (blocked until blockers reach landing/closed; you get a \"débloquée\" delivery). Priority: set_priority / priority 0-3 (0 = critical, 1 = highest, then in order).",
+    "Tags (create_task/move_task tags, listed by list_messages as tags: a,b) say who CAN take a card: windows / mac / linux, unity (needs a Unity pass), or a machine name. Never start a card whose tags exclude your machine; no tag = anyone.",
     "Start a card: move_task in_progress with agent {vendor, model, effort} (required the first time: it draws who works the card; reply_to_message also takes agent when a card changes hands). Blocked on the human: reply_to_message kind question (auto-moves to questions). Progress notes: kind update (silent).",
     "Done with real proof: reply_to_message kind done (auto-moves to approbation). Every proof image is labelled: ![Before](/api/image?path=<enc> \"one sentence on what it shows\") - alt = short tag (Before / After / Original), quoted title = what the image shows; both appear over the zoomed image.",
     "Entering landing/closed requires the human's approval unless the task was created no_review (create_task no_review: true); closing a card already in landing is free.",
@@ -229,6 +239,7 @@ function buildServer() {
       const rows = live.map((m) => {
         let row = `[${m.id}] ${m.direction}/${m.kind}/${m.status}/${m.state || "-"}: ${m.title}`;
         if (m.priority === 0 || m.priority === 1 || m.priority === 3) row += ` p${m.priority}`;
+        if (m.tags && m.tags.length) row += ` tags: ${m.tags.join(",")}`;
         // Only the still-active blockers, matching what the board itself shows
         // (a landed/closed blocker no longer counts, even if still listed in
         // blockedBy).
@@ -391,10 +402,11 @@ function buildServer() {
           .boolean()
           .optional()
           .describe("Marks a task that will not need the human's approval to land/close — it still shows on the board like any other."),
+        tags: TAGS_SCHEMA,
       },
     },
-    async ({ title, context, project, blocked_by, priority, no_review }) => {
-      const msg = store.createTask({ title, context, project, blockedBy: blocked_by, priority, noReview: no_review });
+    async ({ title, context, project, blocked_by, priority, no_review, tags }) => {
+      const msg = store.createTask({ title, context, project, blockedBy: blocked_by, priority, noReview: no_review, tags });
       // First block stays the bare id (callers parse it as-is); a second block reminds
       // how to wire dependencies/priority, which the bare-id return left easy to miss.
       return {
@@ -421,10 +433,11 @@ function buildServer() {
         blocked_by: z.array(z.string()).optional().describe("Replaces this card's blockers (ids); empty list unblocks."),
         priority: PRIORITY_SCHEMA,
         agent: AGENT_SCHEMA,
+        tags: TAGS_SCHEMA,
       },
     },
-    async ({ id, state, note, blocked_by, priority, agent }) => {
-      store.moveTask(id, state, note, { blockedBy: blocked_by, priority, actor: "agent", agent });
+    async ({ id, state, note, blocked_by, priority, agent, tags }) => {
+      store.moveTask(id, state, note, { blockedBy: blocked_by, priority, actor: "agent", agent, tags });
       return { content: [{ type: "text", text: `Moved ${id} to ${state}` }] };
     }
   );
