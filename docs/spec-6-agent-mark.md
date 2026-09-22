@@ -35,6 +35,9 @@ Mirror on the Hub port. lifecycle.js is untouched; a new shared module carries t
 - Pending image chips repaint every `.pending-row` sharing the key (board card and open overlay), so a drop into the overlay shows up at once.
 - Overlay usable on a phone: header inside the scroll area, pills and buttons on the first row, title full width below; `overscroll-behavior: contain` on the scroll area and `body.overlay-open { overflow: hidden }`.
 
+- Taskbar badge: an open agent card lights it only when `agentAwaitingDecision` (questions / approbation); a kind:note in in_progress no longer does.
+- Tags: optional `tags: string[]` on cards (lowercased, deduped, absent when empty). `create_task` and `move_task` take `tags` (an empty list on move clears them); `list_messages` prints `tags: a,b`; a human message derives tags from `#word` tokens in its text without altering it. Rendered as `chip chip-tag` after the title on compact cards and in the overlay header; in the fingerprint. Tools v7 with the instruction line: tags say who CAN take a card (windows / mac / linux, unity, machine name), no tag = anyone.
+
 ## Assets
 
 `public/agents/claude.svg` (Wikimedia Commons Claude symbol, fill `hsl(14.8, 63.1%, 59.6%)`), `public/agents/codex.png` (ChatGPT mark, 48px, pre-tinted `#ebebeb` on alpha), `public/agents/antigravity.png` (Google press-page icon, 48px, full color). These are third-party trademarks: fine on a personal board, check before shipping them inside the Hub.
