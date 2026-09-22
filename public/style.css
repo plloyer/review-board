@@ -292,6 +292,7 @@ header.drag-over { outline: 2px dashed #4a90d9; outline-offset: -2px; }
 /* The header scrolls with the body (a long description must not pin the
    panel); pills and buttons take the first row, the title the full width below. */
 .overlay-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: -16px -18px 16px; padding: 14px 18px; border-bottom: 1px solid #2a2a2e; }
+.overlay-id { font-size: 11px; font-family: ui-monospace, monospace; text-transform: uppercase; color: #8a8a90; user-select: all; flex-shrink: 0; }
 .overlay-title-wrap { flex-basis: 100%; order: 1; min-width: 0; }
 .overlay-close { margin-left: auto; }
 .overlay-title { font-size: 14px; overflow-wrap: anywhere; }

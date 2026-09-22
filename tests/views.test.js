@@ -559,3 +559,8 @@ test("imagesHTML: a video attachment renders as a player, not a broken <img>; th
   const view = Views.deriveCompactView({ id: "u1", direction: "human", status: "open", state: "backlog", title: "T", images: [{ path: "C:/u/clip.mp4" }] });
   assert.equal(view.miniThumb, "");
 });
+
+test("overlay header shows the card id", () => {
+  const view = Views.deriveOverlayView({ id: "u119", direction: "human", status: "open", state: "in_progress", title: "T" });
+  assert.match(view.headerHTML, /<span class="overlay-id">u119<\/span>/);
+});

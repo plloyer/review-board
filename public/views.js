@@ -553,6 +553,7 @@ function overlayHeader(msg, blockedBy = []) {
   const subtitle = msg.summary ? `<div class="overlay-subtitle">${core.fullTitle}</div>` : "";
   return `
     <div class="overlay-head">
+      <span class="overlay-id">${esc(msg.id)}</span>
       ${core.sourceChip}
       <div class="overlay-title-wrap">
         <strong class="overlay-title">${core.shortTitle}</strong>
