@@ -17,6 +17,21 @@ app.setAppUserModelId("com.ployer.review-board");
 
 const PORT = 5677;
 
+// One line per start, listen and crash in data/startup.log, so an autostart
+// that silently fails leaves a trace.
+const STARTUP_LOG = path.join(__dirname, "data", "startup.log");
+function startupLog(line) {
+  try {
+    fs.mkdirSync(path.dirname(STARTUP_LOG), { recursive: true });
+    fs.appendFileSync(STARTUP_LOG, `${new Date().toISOString()} pid=${process.pid} ${line}\n`);
+  } catch {}
+}
+startupLog(`start argv=${JSON.stringify(process.argv.slice(1))}`);
+process.on("uncaughtException", (err) => {
+  startupLog(`crash ${err && err.stack ? err.stack.split("\n")[0] : err}`);
+  throw err;
+});
+
 function startServer() {
   const web = createApp({ clipboard });
 
@@ -53,7 +68,11 @@ function startServer() {
 
   // Bind to all interfaces so phone/iPad on the same LAN can reach it too.
   // ponytail: no auth — fine on a home LAN, not something to expose past it.
-  web.listen(PORT, "0.0.0.0", () => console.log(`Review board listening on http://localhost:${PORT}`));
+  const server = web.listen(PORT, "0.0.0.0", () => {
+    startupLog(`listening ${PORT}`);
+    console.log(`Review board listening on http://localhost:${PORT}`);
+  });
+  server.on("error", (err) => startupLog(`listen error ${err.code || err.message}`));
 }
 
 const BOUNDS_FILE = path.join(__dirname, "data", "window-bounds.json");
@@ -209,6 +228,7 @@ function createTray() {
 
 // Single-instance: a second launch focuses the existing window instead of crashing on EADDRINUSE.
 if (!app.requestSingleInstanceLock()) {
+  startupLog("second instance, handing over to the running one");
   app.quit();
 } else {
   app.on("second-instance", showWindow);
