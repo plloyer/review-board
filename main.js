@@ -28,7 +28,9 @@ function startServer() {
   const notifiedIds = new Set();
   let lastThreadNotifiedAt = new Date().toISOString();
   store.events.on("change", () => {
-    const open = store.list().filter((m) => m.direction === "agent" && m.status === "open");
+    // Same rule as the badge: only an agent card awaiting his decision (question
+    // or review) pings; an FYI note in in_progress stays silent.
+    const open = store.list().filter((m) => m.direction === "agent" && m.status === "open" && agentAwaitingDecision(m));
     const openIds = new Set(open.map((m) => m.id));
     for (const id of notifiedIds) if (!openIds.has(id)) notifiedIds.delete(id); // bound memory
     for (const m of open) {
