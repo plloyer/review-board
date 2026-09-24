@@ -354,6 +354,7 @@ function moveTask(id, newState, note, opts = {}) {
   const dependents = state.messages.filter((m) => (m.blockedBy || []).includes(id));
   const wasBlocked = new Map(dependents.map((d) => [d.id, isBlocked(d, state.messages)]));
 
+  if (newState === "in_progress" && msg.state !== "in_progress") msg.startedAt = new Date().toISOString();
   msg.state = newState;
   // Re-ask: an agent card the human already answered, sent back to "questions"
   // for another round. Without this, `status` stays "answered" and the badge/

@@ -10,6 +10,23 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const Views = require("../public/views");
 
+test("formatRunTime is compact: minutes, then hours and minutes, then days and hours", () => {
+  const since = "2026-09-24T10:00:00.000Z";
+  const at = (ms) => Date.parse(since) + ms;
+  const M = 60000, H = 60 * M, D = 24 * H;
+  assert.equal(Views.formatRunTime(since, at(30 * 1000)), "0m");
+  assert.equal(Views.formatRunTime(since, at(12 * M)), "12m");
+  assert.equal(Views.formatRunTime(since, at(2 * H + 14 * M)), "2h 14m");
+  assert.equal(Views.formatRunTime(since, at(D + 3 * H + 20 * M)), "1j 3h");
+  assert.equal(Views.formatRunTime(undefined, at(0)), "");
+});
+
+test("the compact card shows the run time only while in progress", () => {
+  const base = { id: "u1", direction: "human", title: "T", startedAt: "2026-09-24T10:00:00.000Z" };
+  assert.match(Views.deriveCompactView({ ...base, state: "in_progress" }).runTime, /class="ccard-run" data-since="2026-09-24T10:00:00.000Z"/);
+  assert.equal(Views.deriveCompactView({ ...base, id: "u2", state: "questions" }).runTime, "");
+});
+
 test("mdToPlainText strips the stubbed markdown wrapper and collapses whitespace", () => {
   assert.equal(Views.mdToPlainText("hello   world"), "hello world");
 });

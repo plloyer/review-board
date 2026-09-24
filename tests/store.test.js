@@ -427,6 +427,17 @@ test("moveTask validates the state, moves the card, and optionally drops a threa
   assert.equal(moved.thread[0].from, "agent");
 });
 
+test("moveTask stamps startedAt on entry into in_progress only, so the card shows how long it has run", () => {
+  const { store } = freshStore();
+  const task = store.createTask({ title: "Do the thing" });
+  assert.equal(task.startedAt, undefined);
+  const first = store.moveTask(task.id, "in_progress").startedAt;
+  assert.ok(first);
+  assert.equal(store.moveTask(task.id, "in_progress").startedAt, first, "a re-move within in_progress keeps the clock");
+  store.moveTask(task.id, "questions");
+  assert.equal(store.moveTask(task.id, "questions").startedAt, first, "leaving in_progress does not restamp");
+});
+
 test("moveTask throws on an unknown id or an unknown state", () => {
   const { store } = freshStore();
   const task = store.createTask({ title: "Do the thing" });

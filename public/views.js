@@ -288,6 +288,22 @@ function tagChipsHTML(tags) {
   return (tags || []).map((t) => `<span class="chip chip-tag">${esc(t)}</span>`).join("");
 }
 
+function formatRunTime(since, now = Date.now()) {
+  if (!since) return "";
+  const min = Math.max(0, Math.floor((now - Date.parse(since)) / 60000));
+  if (min < 60) return `${min}m`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h}h ${min % 60}m`;
+  return `${Math.floor(h / 24)}j ${h % 24}h`;
+}
+
+// The text is filled and ticked by app.js, so the memoized card never freezes it.
+function runTimeHTML(msg) {
+  return msg.state === "in_progress" && msg.startedAt
+    ? `<span class="ccard-run" data-since="${esc(msg.startedAt)}">${formatRunTime(msg.startedAt)}</span>`
+    : "";
+}
+
 function tagNoteHTML(tags) {
   return tags && tags.length ? `<span class="ccard-tags">${tags.map(esc).join(" · ")}</span>` : "";
 }
@@ -361,6 +377,7 @@ function messageFingerprint(msg, extra = {}) {
     msg.taskKind,
     msg.agent || null,
     msg.tags || null,
+    msg.startedAt || null,
     msg.blockedBy || null,
     msg.summary,
     msg.title,
@@ -421,6 +438,7 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
     const priorityChip = priorityChipHTML(msg.priority);
     const agentMark = agentMarkHTML(msg.agent);
     const tagNote = tagNoteHTML(msg.tags);
+    const runTime = runTimeHTML(msg);
     const undelivered = msg.direction === "human" && !msg.replyTo && !msg.lastDeliveredAt && !msg.acknowledgedAt;
     const cancelBtn = undelivered ? `<button class="cancel-sent" title="Annuler">×</button>` : "";
 
@@ -436,6 +454,7 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
         priorityChip,
         agentMark,
         tagNote,
+        runTime,
         sourceChip: core.sourceChip,
         title: core.shortTitle,
         miniThumb: core.miniThumbHTML,
@@ -491,6 +510,7 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
       priorityChip,
       agentMark,
       tagNote,
+      runTime,
       sourceChip: core.sourceChip,
       title: core.shortTitle,
       miniThumb: core.miniThumbHTML,
@@ -653,6 +673,7 @@ const Views = {
   sourceChipHTML,
   imagesHTML,
   isVideoPath,
+  formatRunTime,
   renderDetail,
   threadHTML,
   threadTail,

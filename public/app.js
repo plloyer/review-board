@@ -890,6 +890,7 @@ function compactCard(msg, blockedInfo) {
       ${view.miniThumb}
       ${view.cancelBtn}
       ${view.marker || ""}
+      ${view.runTime || ""}
     </div>
     ${view.blockedBadge ? `<div class="blocked-row">${view.blockedBadge}</div>` : ""}
     ${
@@ -1618,6 +1619,7 @@ checkForNewBuild();
 setInterval(() => {
   refresh();
   checkForNewBuild();
+  for (const el of document.querySelectorAll(".ccard-run[data-since]")) el.textContent = window.Views.formatRunTime(el.dataset.since);
 }, 10000);
 
 // Push notifications: needs a secure context (HTTPS, or localhost) — a plain

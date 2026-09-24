@@ -181,6 +181,7 @@ button:hover { background: #444; }
   overflow: hidden;
 }
 /* Tags on the compact card: a dim word list at the end of the grey line, no box. */
+.ccard-run { flex-shrink: 0; align-self: flex-start; font-size: 11px; line-height: 17.5px; color: #6e7a86; font-variant-numeric: tabular-nums; }
 .ccard-tags { flex-shrink: 0; font-size: 10px; color: #6e7a86; letter-spacing: 0.03em; line-height: 15.4px; }
 .ccard-sub.sub-human, .ccard-sub.sub-question, .ccard-sub.sub-done { color: #a0a0a6; }
 .ccard-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; align-items: center; }
