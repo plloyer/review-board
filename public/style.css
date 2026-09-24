@@ -120,6 +120,24 @@ button:hover { background: #444; }
 .ccard .chip-prio { width: 22px; padding: 1px 0; text-align: center; }
 .agent-mark { position: absolute; left: 0; top: 0; width: 22px; height: 15px; display: flex; align-items: center; justify-content: center; }
 .agent-mark img { width: 14px; height: 14px; }
+/* The native title tooltip does not show reliably in the Electron window, so
+   the model and effort ride a CSS tooltip (also works on a tap on the phone). */
+.agent-mark[data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 0;
+  top: 19px;
+  z-index: 20;
+  white-space: pre;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid #44444c;
+  background: #2c2c32;
+  color: #ececf0;
+  font-size: 11px;
+  line-height: 1.4;
+  pointer-events: none;
+}
 /* The title is the most informative line on the card — give it up to 2 lines
    before clipping instead of squeezing it onto one. */
 .ccard-title { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; line-height: 1.35; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }

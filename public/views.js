@@ -279,7 +279,7 @@ function agentMarkHTML(agent) {
   const vendor = AGENT_VENDORS[agent.vendor];
   const lines = [`${vendor.label} · ${agent.model}`];
   if (agent.effort) lines.push(`Effort : ${agent.effort}`);
-  return `<span class="agent-mark" title="${lines.map(esc).join("&#10;")}"><img src="${vendor.icon}" alt="${vendor.label}"></span>`;
+  return `<span class="agent-mark" data-tip="${lines.map(esc).join("&#10;")}"><img src="${vendor.icon}" alt="${vendor.label}"></span>`;
 }
 
 // Overlay header: one chip per tag. Compact card: a dim word list at the end

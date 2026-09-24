@@ -510,10 +510,11 @@ test("deriveCompactView: agent mark with vendor icon and model/effort tooltip; n
   const view = Views.deriveCompactView({ ...base, agent: { vendor: "claude", model: "Fable 5.1", effort: "max" } });
   assert.match(view.agentMark, /class="agent-mark"/);
   assert.match(view.agentMark, /src="agents\/claude\.svg"/);
-  assert.match(view.agentMark, /title="Claude · Fable 5\.1&#10;Effort : max"/);
+  assert.match(view.agentMark, /data-tip="Claude · Fable 5\.1&#10;Effort : max"/);
+  assert.doesNotMatch(view.agentMark, /title=/, "the native tooltip is not shown by Electron; a CSS one replaces it");
   const noEffort = Views.deriveCompactView({ ...base, id: "u2", agent: { vendor: "codex", model: "GPT-5.4" } });
   assert.match(noEffort.agentMark, /src="agents\/codex\.png"/);
-  assert.match(noEffort.agentMark, /title="Codex · GPT-5\.4"/);
+  assert.match(noEffort.agentMark, /data-tip="Codex · GPT-5\.4"/);
   // Changing the agent must not be hidden by the memo cache.
   const changed = Views.deriveCompactView({ ...base, agent: { vendor: "antigravity", model: "Gemini 3.1 Pro", effort: "medium" } });
   assert.match(changed.agentMark, /antigravity\.png/);
