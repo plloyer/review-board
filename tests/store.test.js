@@ -906,6 +906,18 @@ test("humanThreadNote on a questions-state card moves it back to in_progress (hi
   assert.equal(store.list().find((m) => m.id === h.id).state, "in_progress");
 });
 
+test("humanThreadNote on an answered agent card lands in that card's thread and shows in its overlay", () => {
+  const { store } = freshStore();
+  const a = store.addAgentMessage({ title: "Keep it?", kind: "question", options: ["Oui", "Non"] });
+  store.reply(a.id, { optionChosen: "Oui" });
+  store.humanThreadNote(a.id, "et retire l'interdiction");
+  const card = store.list().find((m) => m.id === a.id);
+  assert.deepEqual(card.thread.map((t) => [t.from, t.text]), [["human", "et retire l'interdiction"]]);
+  global.marked = global.marked || { parse: (s) => s, parseInline: (s) => s };
+  const Views = require("../public/views");
+  assert.match(Views.deriveOverlayView(card).bodyHTML, /et retire l'interdiction/);
+});
+
 // --- reopen (human-only: sends a closed/landing card back to backlog) --------
 
 test("reopen: a closed agent-direction card goes back to backlog, decision cleared, status reset to open, retro preserved, default note appended", () => {

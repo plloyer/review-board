@@ -133,7 +133,7 @@ function card(msg) {
   `;
 
   if (msg.status === "answered") {
-    const submitFollowup = () => submitThreadComment(el, ".followup-text", followupKey, msg.title);
+    const submitFollowup = () => submitThreadComment(el, ".followup-text", followupKey, msg.title, msg.id);
     el.querySelector(".send-followup").addEventListener("click", submitFollowup);
     el.querySelector(".followup-text").addEventListener("keydown", (e) => {
       if (submitsOnEnter(e)) {
@@ -1120,7 +1120,7 @@ function wireOverlayFooter(panel, msg) {
   if (msg.direction === "agent") {
     if (msg.status === "answered" && !agentAwaitingDecision(msg)) {
       const followupKey = `followup:${msg.id}`;
-      const submitFollowup = () => submitThreadComment(panel, ".followup-text", followupKey, msg.title);
+      const submitFollowup = () => submitThreadComment(panel, ".followup-text", followupKey, msg.title, msg.id);
       panel.querySelector(".send-followup").addEventListener("click", submitFollowup);
       panel.querySelector(".followup-text").addEventListener("keydown", (e) => {
         if (submitsOnEnter(e)) {
