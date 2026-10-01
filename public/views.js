@@ -97,14 +97,29 @@ function detailsHTML(details) {
 // Shared by overlayAgentBody/overlayHumanBody/sentCard's expanded view — one
 // message's thread can carry entries from either side; rendered identically
 // regardless of which body the message ends up in.
+// An agent's routine updates are a log he rarely reads: each consecutive run
+// folds, closed, under one line in place; its question/done is what he must read.
 function threadHTML(msg) {
-  return (msg.thread || [])
-    .map((t) => {
-      // An agent's routine update is a log line he skims; its question/done is what he must read.
-      const tier = t.from === "agent" ? (t.kind === "update" ? " log" : " for-you") : "";
-      return `<div class="thread-entry from-${t.from}${tier}">${marked.parse(t.text, { breaks: true })}</div>`;
-    })
-    .join("");
+  const out = [];
+  let logs = [];
+  const flush = () => {
+    if (!logs.length) return;
+    const n = logs.length;
+    out.push(`<details class="log-fold"><summary>${n} note${n > 1 ? "s" : ""} de suivi</summary>${logs.join("")}</details>`);
+    logs = [];
+  };
+  for (const t of msg.thread || []) {
+    const isLog = t.from === "agent" && t.kind === "update";
+    const tier = t.from === "agent" ? (isLog ? " log" : " for-you") : "";
+    const entry = `<div class="thread-entry from-${t.from}${tier}">${marked.parse(t.text, { breaks: true })}</div>`;
+    if (isLog) logs.push(entry);
+    else {
+      flush();
+      out.push(entry);
+    }
+  }
+  flush();
+  return out.join("");
 }
 
 // Shared by overlayAgentBody/overlayHumanBody: the worker's retrospective,

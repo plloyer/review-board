@@ -10,6 +10,24 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const Views = require("../public/views");
 
+test("thread: each run of consecutive agent updates folds under one closed 'notes de suivi' line, in place", () => {
+  global.marked = global.marked || { parse: (s) => s, parseInline: (s) => s };
+  const html = Views.threadHTML({
+    thread: [
+      { from: "agent", kind: "update", text: "a" },
+      { from: "agent", kind: "update", text: "b" },
+      { from: "agent", kind: "question", text: "Q?" },
+      { from: "agent", kind: "update", text: "c" },
+      { from: "agent", kind: "done", text: "Fini" },
+    ],
+  });
+  const folds = html.match(/<details class="log-fold">/g) || [];
+  assert.equal(folds.length, 2);
+  assert.match(html, /<summary>2 notes de suivi<\/summary>/);
+  assert.match(html, /<summary>1 note de suivi<\/summary>/);
+  assert.ok(html.indexOf("2 notes") < html.indexOf("Q?") && html.indexOf("Q?") < html.indexOf("1 note") && html.indexOf("1 note") < html.indexOf("Fini"));
+});
+
 test("thread: an agent update is a dimmed log line, an agent question/done is the white box addressed to him", () => {
   global.marked = global.marked || { parse: (s) => s, parseInline: (s) => s };
   const html = Views.threadHTML({
