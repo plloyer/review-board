@@ -10,6 +10,34 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const Views = require("../public/views");
 
+test("feedback context is visible on compact, sent and overlay cards and its download link is rendered", () => {
+  const context = 'Loading day 42 crashes. [Download save](/api/file?path=save.tc)';
+  const card = { id: "u634-context", title: "Player bug", context, direction: "human", createdBy: "agent", taskKind: "feedback", state: "backlog", status: "open" };
+  assert.match(Views.deriveCompactView(card).sub.text, /Loading day 42 crashes/);
+  assert.match(Views.deriveSentView(card, false).sub, /Loading day 42 crashes/);
+  const previousMarked = global.marked;
+  // Use the browser's actual Markdown parser to verify a clickable save link.
+  global.marked = require("../public/marked.min.js");
+  try {
+    for (const html of [Views.deriveSentView(card, true).contextHTML, Views.deriveOverlayView(card).bodyHTML]) {
+      assert.match(html, /Loading day 42 crashes/);
+      assert.match(html, /href="\/api\/file\?path=save.tc"/);
+    }
+    const changed = { ...card, context: "Another crash" };
+    assert.match(Views.deriveOverlayView(changed).bodyHTML, /Another crash/);
+  } finally {
+    global.marked = previousMarked;
+  }
+});
+
+test("projet context is shown on the sent card and in the overlay; its subline stays the creation note", () => {
+  const card = { id: "u634-projet", title: "Do X", context: "Run the smoke first", direction: "human", createdBy: "agent", taskKind: "projet", state: "backlog", status: "open" };
+  assert.match(Views.deriveSentView(card, false).contextHTML, /Run the smoke first/);
+  assert.match(Views.deriveOverlayView(card).bodyHTML, /Run the smoke first/);
+  assert.equal(Views.deriveSentView(card, false).sub, "Créée par l'IA");
+  assert.equal(Views.deriveCompactView(card).sub.text, "Créée par l'IA");
+});
+
 test("formatRunTime is compact: minutes, then hours and minutes, then days and hours", () => {
   const since = "2026-09-24T10:00:00.000Z";
   const at = (ms) => Date.parse(since) + ms;

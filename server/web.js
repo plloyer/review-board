@@ -3,13 +3,19 @@ const express = require("express");
 const path = require("path");
 const fs = require("fs");
 const { StreamableHTTPServerTransport } = require("@modelcontextprotocol/sdk/server/streamableHttp.js");
-const { buildServer } = require("./mcp");
+const { buildServer, originalName } = require("./mcp");
 const store = require("./store");
 const push = require("./push");
 const { summarizeTitle } = require("./summarize");
 const { extractPathRefs } = require("../shared/lifecycle");
 
 const BUILD_ID = String(Date.now());
+const MAX_SAVE_BYTES = 32 * 1024 * 1024;
+
+function isInsideDirectory(dir, file) {
+  const rel = path.relative(normalizeForCompare(dir), normalizeForCompare(file));
+  return rel !== "" && rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel);
+}
 
 // Path comparisons are case-insensitive on win32 (the filesystem is), case-sensitive elsewhere.
 function normalizeForCompare(resolved) {
@@ -86,14 +92,49 @@ function createApp({ clipboard } = {}) {
 
   web.post("/api/upload", (req, res) => {
     const { dataUrl, filename } = req.body || {};
-    const match = typeof dataUrl === "string" && dataUrl.match(/^data:(image|video)\/(\w+);base64,(.+)$/);
-    if (!match) return res.status(400).json({ error: "dataUrl (image or video) required" });
+    const match = typeof dataUrl === "string" && dataUrl.match(/^data:((?:image|video)\/\w+|application\/octet-stream);base64,(.+)$/);
+    if (!match || (filename && typeof filename !== "string")) {
+      return res.status(400).json({ error: "dataUrl (image, video, or application/octet-stream with a .tc filename) required" });
+    }
+    const isSave = match[1] === "application/octet-stream";
+    if (isSave) {
+      if (!filename || !/\.tc$/i.test(filename)) return res.status(400).json({ error: "save filename must end in .tc" });
+      if (match[2].length > Math.ceil(MAX_SAVE_BYTES / 3) * 4) {
+        return res.status(413).json({ error: "save exceeds 32 MiB" });
+      }
+      if (match[2].length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(match[2])) {
+        return res.status(400).json({ error: "invalid save base64" });
+      }
+    }
+    const bytes = Buffer.from(match[2], "base64");
+    if (isSave && bytes.length > MAX_SAVE_BYTES) return res.status(413).json({ error: "save exceeds 32 MiB" });
     const dir = path.join(store.DATA_DIR, "uploads");
     fs.mkdirSync(dir, { recursive: true });
-    const safeName = `${Date.now()}-${(filename || `${match[1]}.${match[2]}`).replace(/[^a-zA-Z0-9.\-_]/g, "_")}`;
+    const safeName = `${Date.now()}-${(filename || match[1].replace("/", ".")).replace(/[^a-zA-Z0-9.\-_]/g, "_")}`;
     const dest = store.uniqueUploadName(dir, safeName);
-    fs.writeFileSync(dest, Buffer.from(match[3], "base64"));
-    res.json({ path: dest });
+    fs.writeFileSync(dest, bytes);
+    res.json({ path: dest, downloadUrl: `/api/file?path=${encodeURIComponent(dest)}` });
+  });
+
+  // Unlike /api/image, downloads never trust paths referenced by cards or the
+  // rest of DATA_DIR. Check both lexical and real paths to exclude symlink escapes.
+  web.get("/api/file", (req, res, next) => {
+    if (typeof req.query.path !== "string") return res.status(404).end();
+    const dir = path.resolve(store.DATA_DIR, "uploads");
+    const resolved = path.resolve(req.query.path);
+    if (!isInsideDirectory(dir, resolved)) return res.status(404).end();
+    let realFile;
+    try {
+      realFile = fs.realpathSync(resolved);
+      if (!isInsideDirectory(fs.realpathSync(dir), realFile) || !fs.statSync(realFile).isFile()) {
+        return res.status(404).end();
+      }
+    } catch (err) {
+      if (["ENOENT", "ENOTDIR", "EINVAL"].includes(err.code)) return res.status(404).end();
+      return next(err);
+    }
+    res.type("application/octet-stream");
+    res.download(realFile, originalName(resolved));
   });
 
   web.post("/api/messages", (req, res) => {

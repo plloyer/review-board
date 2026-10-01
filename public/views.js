@@ -182,6 +182,7 @@ function compactSubline(msg, tail) {
     return { cls: "", text: snippet };
   }
   if (msg.direction === "human") {
+    if (msg.taskKind === "feedback" && msg.context) return { cls: "", text: compactSnippet(msg.context) };
     if (msg.createdBy === "agent") return { cls: "", text: "Créée par l'IA" };
     if (msg.acknowledgedAt) return { cls: "", text: "✓ Lu par l'IA · en attente d'une réponse" };
     if (msg.lastDeliveredAt) return { cls: "", text: "Livré — attend confirmation" };
@@ -199,6 +200,7 @@ function sentSubline(msg, delivered, tail) {
     if (tail.kind === "done") return `<span class="ia-reply ia-done">✅ Terminé — à valider : ${tail.snippet}</span>`;
     return `<span class="ia-reply">↳ IA : ${tail.snippet}</span>`;
   }
+  if (msg.taskKind === "feedback" && msg.context) return compactSnippet(msg.context);
   if (msg.direction === "human" && msg.createdBy === "agent") return "Créée par l'IA";
   if (msg.acknowledgedAt) return "✓ Lu par l'IA · en attente d'une réponse";
   if (delivered || msg.lastDeliveredAt) return "Livré — attend confirmation";
@@ -559,6 +561,7 @@ function deriveSentView(msg, delivered, { pendingCounts } = {}) {
       approveBtn: core.canApprove,
       unseenDot: core.unseenActionable,
       summaryTitle: core.summaryOrTitle,
+      contextHTML: msg.context ? `<div class="context md">${marked.parse(msg.context, { breaks: true })}</div>` : "",
       images: imagesHTML(msg.images),
       miniThumb: core.miniThumbHTML,
       thread: core.threadHTML,
@@ -638,6 +641,7 @@ function overlayHumanBody(msg) {
   const approveBtn = core.canApprove ? `<button class="approve-issue-btn">✅ Approuver</button>` : "";
 
   const bodyHTML = `
+    ${msg.context ? `<div class="context md">${marked.parse(msg.context, { breaks: true })}</div>` : ""}
     ${images ? `<div class="images">${images}</div>` : ""}
     ${thread ? `<div class="thread">${thread}</div>` : ""}
     ${core.retroHTML}

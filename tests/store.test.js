@@ -16,6 +16,18 @@ function freshStore() {
   return { store: require("../server/store"), dir };
 }
 
+test("createTask feedback shares the human-feedback shape and is deliverable; invalid kinds create nothing", () => {
+  const { store } = freshStore();
+  const own = store.addHumanMessage("PL feedback", []);
+  const context = "Player crash. [Save](/api/file?path=save.tc)";
+  const task = store.createTask({ title: "Player feedback", context, taskKind: "feedback", project: "Three Crowns" });
+  for (const key of ["taskKind", "direction", "kind", "state", "status", "replyTo"]) assert.equal(task[key], own[key], key);
+  assert.equal(task.context, context);
+  assert.ok(store.peekDeliverable().some((m) => m.id === task.id));
+  assert.throws(() => store.createTask({ title: "Invalid", taskKind: "unknown" }), /Invalid taskKind/);
+  assert.equal(store.list().length, 2);
+});
+
 test("addAgentMessage assigns r-ids, addHumanMessage assigns u-ids", () => {
   const { store } = freshStore();
   const a1 = store.addAgentMessage({ title: "Review this" });

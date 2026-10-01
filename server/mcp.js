@@ -71,6 +71,7 @@ function formatDelivered(items) {
     }
     if (m.direction === "human") {
       blocks.push({ type: "text", text: `[${m.id}] the human sent you a message: ${m.title}` });
+      if (m.context) blocks.push({ type: "text", text: m.context });
       pushImages(blocks, m.images);
       continue;
     }
@@ -138,7 +139,7 @@ function missingTextRefs(text) {
 // Stateless HTTP has no tools/list_changed channel, so the version rides every
 // await_replies trailer instead — a session that connected under an older
 // version learns from the delivery text that its cached tool list is stale.
-const TOOLS_VERSION = "v7"; // v7: tags on create_task/move_task, shown by list_messages
+const TOOLS_VERSION = "v8"; // v8: create_task accepts taskKind feedback
 
 function buildServer() {
   // The workflow travels with the MCP handshake so every client learns it without
@@ -398,9 +399,10 @@ function buildServer() {
     "create_task",
     {
       description:
-        "Add a project task to the human's backlog (state backlog). His feedback cards always outrank project tasks — work feedback first.",
+        "Add a card to the human's backlog (state backlog). Defaults to taskKind projet; use feedback for a player's bug report, with context and optional save download link. His feedback cards always outrank project tasks — work feedback first.",
       inputSchema: {
         title: z.string(),
+        taskKind: z.enum(["projet", "feedback"]).optional().describe("Defaults to projet. feedback files a real feedback/retours card."),
         context: z.string().optional(),
         project: z.string().optional(),
         blocked_by: z.array(z.string()).optional().describe("Ids of cards that must land/close before this one is unblocked."),
@@ -412,8 +414,8 @@ function buildServer() {
         tags: TAGS_SCHEMA,
       },
     },
-    async ({ title, context, project, blocked_by, priority, no_review, tags }) => {
-      const msg = store.createTask({ title, context, project, blockedBy: blocked_by, priority, noReview: no_review, tags });
+    async ({ title, context, project, blocked_by, priority, no_review, tags, taskKind }) => {
+      const msg = store.createTask({ title, context, project, blockedBy: blocked_by, priority, noReview: no_review, tags, taskKind });
       // First block stays the bare id (callers parse it as-is); a second block reminds
       // how to wire dependencies/priority, which the bare-id return left easy to miss.
       return {
@@ -498,4 +500,4 @@ function buildServer() {
   return server;
 }
 
-module.exports = { buildServer };
+module.exports = { buildServer, originalName };

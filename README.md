@@ -65,3 +65,19 @@ Add any of these when they're actually missed.
 
 Run `node --test tests/*.test.js` (or `npm test`) before restarting the app after
 changes to `server/`. Tests run against a temp data dir and never touch `data/`.
+
+Player bug reports can upload a Three Crowns save with `POST /api/upload`
+using JSON `{dataUrl: "data:application/octet-stream;base64,...", filename: "save.tc"}`.
+Saves are limited to 32 MiB. Existing image/video uploads still work. The response
+contains `path` and a relative `downloadUrl`; resolve that URL against the board's
+network address. `GET /api/file?path=...` serves identical bytes as an octet-stream
+attachment, restricted to files inside `data/uploads/` (including real-path checks).
+
+Call the MCP `create_task` tool with `taskKind: "feedback"`, `title`, and `context`
+(Markdown, optionally linking to `downloadUrl`) to file a real feedback card in
+the backlog/retours group. The HTTP MCP endpoints are `/mcp` and `/mcp-live`;
+there is no separate REST create-task endpoint. Omitting `taskKind` still creates
+a `projet` card, and the first MCP result block remains the bare card id.
+Feedback context appears on compact cards and in full in expanded cards/overlays.
+`projet` and `change-request` cards now also show their context (a change request's
+`details`) on the sent card and in the overlay, and `await_replies` delivers it with the card.

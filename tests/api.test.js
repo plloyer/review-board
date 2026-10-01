@@ -15,6 +15,8 @@ process.env.REVIEW_BOARD_NO_SUMMARY = "1"; // never spawn the summarizer CLI in 
 
 const { createApp } = require("../server/web");
 const store = require("../server/store");
+const { Client } = require("@modelcontextprotocol/sdk/client/index.js");
+const { StreamableHTTPClientTransport } = require("@modelcontextprotocol/sdk/client/streamableHttp.js");
 
 // 1x1 transparent PNG.
 const TINY_PNG_DATA_URL =
@@ -105,6 +107,21 @@ test("POST /api/upload rejects a non-dataUrl body and writes a file for a valid 
     assert.equal(good.status, 200);
     const { path: written } = await good.json();
     assert.ok(fs.existsSync(written));
+  });
+});
+
+// Old clients send null for an unset name (Python None, Newtonsoft); main fell back to image.png for any falsy name.
+test("POST /api/upload treats a null or other falsy filename on an image like a missing one", async () => {
+  await withServer(async (base) => {
+    for (const filename of [null, "", false, 0]) {
+      const res = await fetch(`${base}/api/upload`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ dataUrl: TINY_PNG_DATA_URL, filename }),
+      });
+      assert.equal(res.status, 200, JSON.stringify(filename));
+      assert.match(path.basename((await res.json()).path), /^\d{10,}-image(-\d+)?\.png$/);
+    }
   });
 });
 
@@ -290,3 +307,134 @@ test("POST /api/upload accepts a video data url and keeps its extension", async 
     assert.match((await noName.json()).path, /\.webm$/);
   });
 });
+
+test("a multi-MiB .tc upload downloads identical binary bytes with attachment headers", async () => {
+  await withServer(async (base) => {
+    const bytes = Buffer.alloc(5 * 1024 * 1024 + 1);
+    for (let i = 0; i < bytes.length; i++) bytes[i] = i % 256;
+    const uploaded = await fetch(`${base}/api/upload`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ dataUrl: `data:application/octet-stream;base64,${bytes.toString("base64")}`, filename: "player-save.tc" }),
+    });
+    assert.equal(uploaded.status, 200);
+    const result = await uploaded.json();
+    assert.deepEqual(fs.readFileSync(result.path), bytes);
+    assert.match(result.path, /player-save\.tc$/);
+    assert.equal(new URL(result.downloadUrl, base).searchParams.get("path"), result.path);
+    const downloaded = await fetch(new URL(result.downloadUrl, base));
+    assert.equal(downloaded.status, 200);
+    assert.equal(downloaded.headers.get("content-type"), "application/octet-stream");
+    assert.equal(downloaded.headers.get("content-disposition"), 'attachment; filename="player-save.tc"');
+    assert.deepEqual(Buffer.from(await downloaded.arrayBuffer()), bytes);
+  });
+});
+
+test("save uploads reject unknown MIME types, wrong/missing filenames and malformed base64", async () => {
+  await withServer(async (base) => {
+    const before = fs.readdirSync(path.join(dir, "uploads"));
+    for (const body of [
+      { dataUrl: "data:application/zip;base64,AA==", filename: "save.tc" },
+      { dataUrl: "data:application/octet-stream;base64,AA==", filename: "save.bin" },
+      { dataUrl: "data:application/octet-stream;base64,AA==" },
+      { dataUrl: "data:application/octet-stream;base64,AA==", filename: null },
+      { dataUrl: "data:application/octet-stream;base64,AA==", filename: 42 },
+      { dataUrl: "data:application/octet-stream;base64,???=", filename: "save.tc" },
+      { dataUrl: "data:application/octet-stream;base64,AAA", filename: "save.tc" },
+      { dataUrl: "data:application/octet-stream;base64,", filename: "save.tc" },
+    ]) {
+      const res = await fetch(`${base}/api/upload`, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+      });
+      assert.equal(res.status, 400, JSON.stringify(body));
+    }
+    assert.deepEqual(fs.readdirSync(path.join(dir, "uploads")), before, "rejections must not write files");
+  });
+});
+
+test("save uploads above the 32 MiB limit return 413 and write nothing", async () => {
+  await withServer(async (base) => {
+    const before = fs.readdirSync(path.join(dir, "uploads"));
+    const bytes = Buffer.alloc(32 * 1024 * 1024 + 1, 0xff);
+    const res = await fetch(`${base}/api/upload`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ dataUrl: `data:application/octet-stream;base64,${bytes.toString("base64")}`, filename: "too-big.tc" }),
+    });
+    assert.equal(res.status, 413);
+    assert.deepEqual(fs.readdirSync(path.join(dir, "uploads")), before);
+  });
+});
+
+test("/api/file blocks traversal, prefix siblings, directories and card-referenced files outside uploads", async () => {
+  await withServer(async (base) => {
+    const uploads = path.join(dir, "uploads");
+    const sibling = path.join(dir, "uploads-other");
+    fs.mkdirSync(sibling, { recursive: true });
+    const outside = path.join(dir, "outside.tc");
+    const siblingFile = path.join(sibling, "outside.tc");
+    fs.writeFileSync(outside, "private");
+    fs.writeFileSync(siblingFile, "private");
+    store.addHumanMessage("a reference is not download authorization", [{ path: outside }]);
+    for (const file of [outside, siblingFile, path.join(uploads, "..", "outside.tc"), uploads, path.join(uploads, "missing.tc")]) {
+      const res = await fetch(`${base}/api/file?path=${encodeURIComponent(file)}`);
+      assert.equal(res.status, 404, file);
+    }
+    // Keep the traversal literal so path.join doesn't normalize it before the request.
+    assert.equal((await fetch(`${base}/api/file?path=${encodeURIComponent(`${uploads}${path.sep}..${path.sep}outside.tc`)}`)).status, 404);
+    assert.equal((await fetch(`${base}/api/file`)).status, 404);
+    assert.equal((await fetch(`${base}/api/file?path=a&path=b`)).status, 404);
+  });
+});
+
+test("/api/file refuses a symlink/junction escape from uploads", async () => {
+  await withServer(async (base) => {
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "review-board-download-outside-"));
+    fs.writeFileSync(path.join(outsideDir, "private.tc"), "secret");
+    const link = path.join(dir, "uploads", "external-link");
+    fs.symlinkSync(outsideDir, link, process.platform === "win32" ? "junction" : "dir");
+    const res = await fetch(`${base}/api/file?path=${encodeURIComponent(path.join(link, "private.tc"))}`);
+    assert.equal(res.status, 404);
+  });
+});
+
+test("upload sanitizes filenames before storing and returning a usable download link", async () => {
+  await withServer(async (base) => {
+    const res = await fetch(`${base}/api/upload`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ dataUrl: "data:application/octet-stream;base64,AP8=", filename: '../player "save".tc' }),
+    });
+    assert.equal(res.status, 200);
+    const uploaded = await res.json();
+    assert.equal(path.dirname(uploaded.path), path.join(dir, "uploads"));
+    assert.match(path.basename(uploaded.path), /^[a-zA-Z0-9._-]+\.tc$/);
+    assert.equal((await fetch(new URL(uploaded.downloadUrl, base))).status, 200);
+  });
+});
+
+for (const endpoint of ["/mcp", "/mcp-live"]) {
+  test(`create_task over HTTP ${endpoint} creates feedback and retains the projet default`, async () => {
+    await withServer(async (base) => {
+      const client = new Client({ name: "feedback-http-test", version: "1" });
+      await client.connect(new StreamableHTTPClientTransport(new URL(endpoint, base)));
+      try {
+        const context = "Loading day 42 crashes. [Save](/api/file?path=example.tc)";
+        const result = await client.callTool({ name: "create_task", arguments: { title: "Player bug", context, taskKind: "feedback" } });
+        assert.notEqual(result.isError, true, result.content[0].text);
+        const cards = await (await fetch(`${base}/api/reviews`)).json();
+        const card = cards.find((m) => m.id === result.content[0].text);
+        assert.equal(card.taskKind, "feedback");
+        assert.equal(card.state, "backlog");
+        assert.equal(card.direction, "human");
+        assert.equal(card.context, context);
+        const project = await client.callTool({ name: "create_task", arguments: { title: "Default project" } });
+        assert.equal(store.list().find((m) => m.id === project.content[0].text).taskKind, "projet");
+        const count = store.list().length;
+        const invalid = await client.callTool({ name: "create_task", arguments: { title: "Invalid", taskKind: "unknown" } });
+        assert.equal(invalid.isError, true);
+        assert.equal(store.list().length, count);
+      } finally {
+        await client.close();
+      }
+    });
+  });
+}

@@ -728,6 +728,7 @@ function sentCard(msg, delivered) {
           ${cancelBtn}
           <span class="archive-link">Archiver</span>
         </div>
+        ${view.contextHTML}
         ${view.images ? `<div class="images">${view.images}</div>` : ""}
         ${view.thread ? `<div class="thread">${view.thread}</div>` : ""}
         <div class="issue-sub">${view.sub}</div>

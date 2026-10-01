@@ -38,6 +38,29 @@ test("create_task files a backlog project task", async () => {
   assert.equal(task.taskKind, "projet");
 });
 
+test("create_task accepts feedback, advertises its enum, and rejects unknown kinds", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  try {
+    const tools = await client.listTools();
+    assert.deepEqual(tools.tools.find((t) => t.name === "create_task").inputSchema.properties.taskKind.enum, ["projet", "feedback"]);
+    const context = "Player crash after loading. [Save](/api/file?path=save.tc)";
+    const result = await client.callTool({ name: "create_task", arguments: { title: "Player bug", taskKind: "feedback", context } });
+    assert.equal(result.content.length, 2);
+    const card = store.list().find((m) => m.id === result.content[0].text);
+    assert.equal(card.taskKind, "feedback");
+    assert.equal(card.state, "backlog");
+    assert.equal(card.context, context);
+    const invalid = await client.callTool({ name: "create_task", arguments: { title: "Bad", taskKind: "unknown" } });
+    assert.equal(invalid.isError, true);
+    assert.equal(store.list().length, 1);
+    const delivery = await client.callTool({ name: "await_replies", arguments: { timeoutSeconds: 1 } });
+    assert.ok(delivery.content.some((block) => block.text === context), "feedback context/save link must also reach the worker");
+  } finally {
+    await client.close();
+  }
+});
+
 test("create_task returns the bare id as its first block, unchanged, plus a dependency reminder block", async () => {
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);

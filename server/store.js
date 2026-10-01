@@ -248,11 +248,12 @@ function setPriority(id, priority) {
   return msg;
 }
 
-// A project task the agent files for itself. Reuses the human-message shape
+// A project task or player feedback filed through create_task. Reuses the human-message shape
 // (direction "human") purely so the existing thread/seen/archive machinery
 // (agentReply, humanThreadNote, markThreadSeen, archive) works on it unmodified;
 // `createdBy` marks the origin and `taskKind` tells it apart from filed feedback.
-function createTask({ title, context, project, blockedBy, priority, noReview, tags }) {
+function createTask({ title, context, project, blockedBy, priority, noReview, tags, taskKind = "projet" }) {
+  if (!["projet", "feedback"].includes(taskKind)) throw new Error(`Invalid taskKind ${taskKind}`);
   const id = `u${state.nextHumanId++}`;
   validatePriority(priority);
   const msg = {
@@ -265,7 +266,7 @@ function createTask({ title, context, project, blockedBy, priority, noReview, ta
     images: [],
     replyTo: null,
     createdBy: "agent",
-    taskKind: "projet",
+    taskKind,
     state: "backlog",
     thread: [],
     status: "open",
