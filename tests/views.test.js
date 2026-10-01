@@ -10,6 +10,22 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const Views = require("../public/views");
 
+test("thread: an agent update is a dimmed log line, an agent question/done is the white box addressed to him", () => {
+  global.marked = global.marked || { parse: (s) => s, parseInline: (s) => s };
+  const html = Views.threadHTML({
+    thread: [
+      { from: "agent", kind: "update", text: "ronde 1 finie" },
+      { from: "agent", kind: "done", text: "Ça marche, à toi d'approuver" },
+      { from: "agent", kind: "question", text: "On garde ?" },
+      { from: "human", text: "oui" },
+    ],
+  });
+  assert.match(html, /class="thread-entry from-agent log">(<p>)?ronde 1 finie/);
+  assert.match(html, /class="thread-entry from-agent for-you">(<p>)?Ça marche/);
+  assert.match(html, /class="thread-entry from-agent for-you">(<p>)?On garde/);
+  assert.match(html, /class="thread-entry from-human">(<p>)?oui/);
+});
+
 test("feedback context is visible on compact, sent and overlay cards and its download link is rendered", () => {
   const context = 'Loading day 42 crashes. [Download save](/api/file?path=save.tc)';
   const card = { id: "u634-context", title: "Player bug", context, direction: "human", createdBy: "agent", taskKind: "feedback", state: "backlog", status: "open" };

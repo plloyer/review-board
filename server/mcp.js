@@ -143,7 +143,7 @@ function missingTextRefs(text) {
 // Stateless HTTP has no tools/list_changed channel, so the version rides every
 // await_replies trailer instead — a session that connected under an older
 // version learns from the delivery text that its cached tool list is stale.
-const TOOLS_VERSION = "v8"; // v8: create_task accepts taskKind feedback
+const TOOLS_VERSION = "v9"; // v9: update renders as a dimmed log, question/done as the plain-language box he reads
 
 function buildServer() {
   // The workflow travels with the MCP handshake so every client learns it without
@@ -154,7 +154,7 @@ function buildServer() {
     "Pick work: the human's feedback backlog cards outrank projet tasks. File your own tasks with create_task.",
     "Dependencies: set_blockers / blocked_by on create_task/move_task (blocked until blockers reach landing/closed; you get a \"débloquée\" delivery). Priority: set_priority / priority 0-3 (0 = critical, 1 = highest, then in order).",
     "Tags (create_task/move_task tags, listed by list_messages as tags: a,b) say who CAN take a card: windows / mac / linux, unity (needs a Unity pass), or a machine name. Never start a card whose tags exclude your machine; no tag = anyone.",
-    "Start a card: move_task in_progress with agent {vendor, model, effort} (required the first time: it draws who works the card; reply_to_message also takes agent when a card changes hands). Blocked on the human: reply_to_message kind question (auto-moves to questions). Progress notes: kind update (silent).",
+    "Start a card: move_task in_progress with agent {vendor, model, effort} (required the first time: it draws who works the card; reply_to_message also takes agent when a card changes hands). Blocked on the human: reply_to_message kind question (auto-moves to questions). Progress notes: kind update (silent, shown dimmed as a log line he skims). The text of a question or done is shown in a bright box he must read: write it for him in plain, friendly language, no jargon, readable on its own without the updates above it.",
     "Done with real proof: reply_to_message kind done (auto-moves to approbation). Every proof image is labelled: ![Before](/api/image?path=<enc> \"one sentence on what it shows\") - alt = short tag (Before / After / Original), quoted title = what the image shows; both appear over the zoomed image.",
     "Entering landing/closed requires the human's approval unless the task was created no_review (create_task no_review: true); closing a card already in landing is free.",
     "Proof files must be readable by the BOARD's machine. Running elsewhere? First POST the bytes: /api/upload {dataUrl, filename} -> {path}, then reference THAT path. A path from your own disk renders as a broken image on his board.",
@@ -331,7 +331,7 @@ function buildServer() {
           .enum(["update", "question", "done"])
           .default("update")
           .describe(
-            "kind: 'update' (default) for routine progress notes — silent, no notification; 'question' when you need the human's input to continue — pings them and moves the card to questions; 'done' when the work on this issue is complete and awaits their validation — pings them and moves the card to approbation."
+            "kind: 'update' (default) for routine progress notes — silent, no notification, shown dimmed as a log line; 'question' when you need the human's input to continue — pings them and moves the card to questions; 'done' when the work on this issue is complete and awaits their validation — pings them and moves the card to approbation. A question or done is shown in a bright box the human must read: write it in plain, friendly language with no jargon (no internal ids, tool names or code terms unless he needs them), readable on its own."
           ),
         retro: z
           .string()

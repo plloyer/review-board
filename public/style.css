@@ -282,6 +282,8 @@ header.drag-over { outline: 2px dashed #4a90d9; outline-offset: -2px; }
 .thread-entry { margin: 4px 0; }
 .thread img { max-width: 320px; max-height: 240px; border-radius: 6px; border: 1px solid #444; cursor: zoom-in; display: block; margin: 6px 0; }
 .thread .from-agent { color: #ccc; font-size: 13px; }
+.thread .from-agent.log { color: #6c6c73; font-size: 12px; margin: 2px 0; }
+.thread .from-agent.for-you { color: #f4f4f6; font-size: 14px; line-height: 1.55; background: #24242a; border-radius: 8px; padding: 8px 12px; margin: 8px 0; }
 /* The human's own entries: neutral text, just a subtle green edge to tell the
    two voices apart without green-on-green reading strain. */
 .thread .from-human { color: #d7d7dc; border-left: 2px solid #3a5a3a; padding-left: 8px; }

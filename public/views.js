@@ -99,7 +99,11 @@ function detailsHTML(details) {
 // regardless of which body the message ends up in.
 function threadHTML(msg) {
   return (msg.thread || [])
-    .map((t) => `<div class="thread-entry from-${t.from}">${marked.parse(t.text, { breaks: true })}</div>`)
+    .map((t) => {
+      // An agent's routine update is a log line he skims; its question/done is what he must read.
+      const tier = t.from === "agent" ? (t.kind === "update" ? " log" : " for-you") : "";
+      return `<div class="thread-entry from-${t.from}${tier}">${marked.parse(t.text, { breaks: true })}</div>`;
+    })
     .join("");
 }
 
