@@ -549,3 +549,47 @@ test("await_replies hands a human video attachment to the agent as a path, next 
   assert.ok(texts.some((t) => t.includes("attached video: clip.mp4") && t.includes(clip)), texts.join("\n"));
   assert.ok(!res.content.some((b) => b.type === "image"), "a video is never inlined as an image block");
 });
+
+// --- delivered image bytes ----------------------------------------------------
+
+test("await_replies never hands out the bytes of a data-folder file, or of anything else outside the media roots", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  // Synthetic stand-ins: the same names as the board's secrets, never the real ones.
+  const secret = "synthetic-vapid-private-key";
+  const uploads = path.join(store.DATA_DIR, "uploads");
+  fs.mkdirSync(uploads, { recursive: true });
+  const key = path.join(store.DATA_DIR, "vapid-keys.json");
+  const besideUploads = path.join(store.DATA_DIR, "beside-uploads.png");
+  const htmlUpload = path.join(uploads, "page.html");
+  for (const file of [key, besideUploads, htmlUpload]) fs.writeFileSync(file, secret);
+  // Both unauthenticated roads that store a path verbatim: POST /api/messages
+  // (a human message) and POST /api/reviews/:id/reply (a reply's images).
+  store.addHumanMessage("look", [{ path: key }, { path: besideUploads }, { path: `${uploads}${path.sep}..${path.sep}vapid-keys.json` }, { path: htmlUpload }]);
+  const card = store.addAgentMessage({ title: "Review this" });
+  store.reply(card.id, { text: "ok", images: [{ path: key }] });
+
+  const res = await client.callTool({ name: "await_replies", arguments: { timeoutSeconds: 1 } });
+  assert.ok(!res.content.some((b) => b.type === "image"), "no refused attachment may come back as an image block");
+  const dump = JSON.stringify(res.content);
+  assert.ok(!dump.includes(secret) && !dump.includes(Buffer.from(secret).toString("base64")), "the file's bytes must not appear anywhere in the delivery");
+});
+
+test("await_replies still inlines an uploaded image byte for byte, next to an attachment it refuses", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const uploads = path.join(store.DATA_DIR, "uploads");
+  fs.mkdirSync(uploads, { recursive: true });
+  const upload = path.join(uploads, "1790000000000-shot.png");
+  fs.writeFileSync(upload, "uploaded png bytes");
+  const outside = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "review-board-outside-")), "elsewhere.png");
+  fs.writeFileSync(outside, "host png bytes");
+  store.addHumanMessage("look", [{ path: outside }, { path: upload }]);
+
+  const res = await client.callTool({ name: "await_replies", arguments: { timeoutSeconds: 1 } });
+  const images = res.content.filter((b) => b.type === "image");
+  assert.equal(images.length, 1, "only the upload is inlined");
+  assert.equal(images[0].mimeType, "image/png");
+  assert.deepEqual(Buffer.from(images[0].data, "base64"), fs.readFileSync(upload));
+  assert.ok(res.content.some((b) => b.text === "attached image: shot.png"));
+});

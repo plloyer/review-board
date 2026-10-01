@@ -25,14 +25,18 @@ function sleep(ms) {
 const IMAGE_CACHE_MAX = 50;
 const imageCache = new Map();
 
+// Same gate as /api/image: anyone on the network can put any path on a message,
+// and this hands the file's bytes to whoever calls await_replies/recent_history.
 function imageBlock(imgPath) {
+  const file = store.servableMedia(imgPath);
+  if (!file) return null;
   try {
-    const key = `${imgPath}:${fs.statSync(imgPath).mtimeMs}`;
+    const key = `${file}:${fs.statSync(file).mtimeMs}`;
     const cached = imageCache.get(key);
     if (cached) return cached;
-    const ext = path.extname(imgPath).slice(1).toLowerCase() || "png";
+    const ext = path.extname(file).slice(1).toLowerCase();
     const mimeType = `image/${ext === "jpg" ? "jpeg" : ext}`;
-    const block = { type: "image", data: fs.readFileSync(imgPath).toString("base64"), mimeType };
+    const block = { type: "image", data: fs.readFileSync(file).toString("base64"), mimeType };
     if (imageCache.size >= IMAGE_CACHE_MAX) imageCache.clear(); // ponytail: full-clear instead of real LRU
     imageCache.set(key, block);
     return block;

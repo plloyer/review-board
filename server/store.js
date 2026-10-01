@@ -1,5 +1,6 @@
 "use strict";
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const { EventEmitter } = require("events");
 const {
@@ -25,12 +26,54 @@ function normalizeForCompare(resolved) {
 
 // True when an already-resolved path sits inside DATA_DIR — a path there was
 // necessarily produced by /api/upload or ingestFile, so it's trusted without
-// needing a separate "is this actually referenced" check. Shared by web.js's
-// /api/image disclosure gate and mcp.js's attachment validation.
+// needing a separate "is this actually referenced" check. Used by mcp.js's
+// attachment validation (handing bytes out goes through the narrower gate below).
 function isUnderDataDir(resolved) {
   const rel = path.relative(normalizeForCompare(path.resolve(DATA_DIR)), normalizeForCompare(resolved));
   return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
+
+function isInsideDirectory(dir, file) {
+  const rel = path.relative(normalizeForCompare(dir), normalizeForCompare(file));
+  return rel !== "" && rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel);
+}
+
+// Every place that hands a file's bytes out (web.js's file routes, mcp.js's
+// image blocks) serves only an allowlisted extension under its own roots —
+// never the rest of DATA_DIR (VAPID private key, push subscriptions,
+// messages.json), never a host path a message merely mentions (anyone on the
+// network can post such a message). The extension check holds inside uploads/
+// too: ingestFile copies in whatever file the caller points it at.
+const UPLOADS_DIR = path.join(DATA_DIR, "uploads");
+// Inline media (/api/image, MCP image blocks): our uploads/ plus the Windows
+// Game Bar captures folder (an archived card still embeds a recording straight
+// from it). What real cards use (png/jpg/mp4) plus the other plain web image
+// types — never html/svg, which would run script on the board's origin.
+const MEDIA_ROOTS = [UPLOADS_DIR, path.join(os.homedir(), "Videos", "Captures")];
+const MEDIA_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4"]);
+// Downloads (/api/file): uploads/ only — a .tc save, or the media every
+// upload's downloadUrl also points at.
+const DOWNLOAD_EXTENSIONS = new Set([...MEDIA_EXTENSIONS, ".tc"]);
+
+// The real path to serve, or null. Lexical check first, so a path outside every
+// root never touches the disk (no stat of a UNC or arbitrary host path); then
+// realpath.native on both sides follows symlinks/junctions and folds 8.3 names
+// and case, so no alias or `..` steps outside the root.
+function servablePath(p, roots, extensions) {
+  if (typeof p !== "string") return null;
+  const requested = path.resolve(p);
+  const root = roots.find((r) => isInsideDirectory(r, requested));
+  if (!root) return null;
+  try {
+    const real = fs.realpathSync.native(requested);
+    return isInsideDirectory(fs.realpathSync.native(root), real) && extensions.has(path.extname(real).toLowerCase()) ? real : null;
+  } catch {
+    return null; // missing, or not a valid path at all (a NUL byte)
+  }
+}
+
+const servableMedia = (p) => servablePath(p, MEDIA_ROOTS, MEDIA_EXTENSIONS);
+const servableDownload = (p) => servablePath(p, [UPLOADS_DIR], DOWNLOAD_EXTENSIONS);
 
 // One-time migration for messages saved before `state` existed. Human replyTo messages
 // are thread-reply delivery vehicles, never rendered as their own card, so they're left
@@ -674,6 +717,8 @@ function archive(id) {
 module.exports = {
   DATA_DIR,
   isUnderDataDir,
+  servableMedia,
+  servableDownload,
   TASK_STATES,
   addAgentMessage,
   addHumanMessage,

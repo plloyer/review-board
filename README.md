@@ -71,7 +71,11 @@ using JSON `{dataUrl: "data:application/octet-stream;base64,...", filename: "sav
 Saves are limited to 32 MiB. Existing image/video uploads still work. The response
 contains `path` and a relative `downloadUrl`; resolve that URL against the board's
 network address. `GET /api/file?path=...` serves identical bytes as an octet-stream
-attachment, restricted to files inside `data/uploads/` (including real-path checks).
+attachment, restricted to `.tc` saves and media (png/jpg/jpeg/gif/webp/mp4) inside
+`data/uploads/` (including real-path checks). `GET /api/image?path=...` serves only
+that media, from `data/uploads/` or the Game Bar `~/Videos/Captures` folder; anything
+else on either route is a bare 404. MCP delivery (`await_replies`, `recent_history`)
+inlines the same media only and skips any other attachment.
 
 Call the MCP `create_task` tool with `taskKind: "feedback"`, `title`, and `context`
 (Markdown, optionally linking to `downloadUrl`) to file a real feedback card in

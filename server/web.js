@@ -7,42 +7,9 @@ const { buildServer, originalName } = require("./mcp");
 const store = require("./store");
 const push = require("./push");
 const { summarizeTitle } = require("./summarize");
-const { extractPathRefs } = require("../shared/lifecycle");
 
 const BUILD_ID = String(Date.now());
 const MAX_SAVE_BYTES = 32 * 1024 * 1024;
-
-function isInsideDirectory(dir, file) {
-  const rel = path.relative(normalizeForCompare(dir), normalizeForCompare(file));
-  return rel !== "" && rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel);
-}
-
-// Path comparisons are case-insensitive on win32 (the filesystem is), case-sensitive elsewhere.
-function normalizeForCompare(resolved) {
-  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
-}
-
-// /api/image discloses only files under our own data dir or actually referenced by a
-// message — never an arbitrary path on the host. Cheap to rebuild per request at this scale.
-function referencedImagePaths() {
-  const set = new Set();
-  const add = (p) => p && set.add(normalizeForCompare(path.resolve(p)));
-  // Agents also embed proof images as markdown inside thread entries, either as
-  // a bare local path or already wrapped in /api/image?path=<encoded> — both count
-  // as referenced.
-  const addMarkdownTargets = (text) => {
-    for (const p of extractPathRefs(text)) add(p);
-  };
-  const collect = (m) => {
-    for (const img of m.images || []) add(img.path);
-    for (const vid of m.videos || []) add(vid.path);
-    if (m.reply) for (const img of m.reply.images || []) add(img.path);
-    for (const t of m.thread || []) addMarkdownTargets(t.text);
-  };
-  store.list().forEach(collect);
-  store.history().forEach(collect);
-  return set;
-}
 
 // Extracted from main.js so it can be exercised with plain HTTP in tests, without
 // requiring electron (main.js still owns the window/notification/badge side effects).
@@ -116,25 +83,15 @@ function createApp({ clipboard } = {}) {
     res.json({ path: dest, downloadUrl: `/api/file?path=${encodeURIComponent(dest)}` });
   });
 
-  // Unlike /api/image, downloads never trust paths referenced by cards or the
-  // rest of DATA_DIR. Check both lexical and real paths to exclude symlink escapes.
-  web.get("/api/file", (req, res, next) => {
-    if (typeof req.query.path !== "string") return res.status(404).end();
-    const dir = path.resolve(store.DATA_DIR, "uploads");
-    const resolved = path.resolve(req.query.path);
-    if (!isInsideDirectory(dir, resolved)) return res.status(404).end();
-    let realFile;
-    try {
-      realFile = fs.realpathSync(resolved);
-      if (!isInsideDirectory(fs.realpathSync(dir), realFile) || !fs.statSync(realFile).isFile()) {
-        return res.status(404).end();
-      }
-    } catch (err) {
-      if (["ENOENT", "ENOTDIR", "EINVAL"].includes(err.code)) return res.status(404).end();
-      return next(err);
-    }
+  // Same gate and bare 404s as /api/image, as an attachment download under the
+  // uploader's own file name.
+  web.get("/api/file", (req, res) => {
+    const file = store.servableDownload(req.query.path);
+    if (!file) return res.status(404).end();
     res.type("application/octet-stream");
-    res.download(realFile, originalName(resolved));
+    res.download(file, originalName(file), (err) => {
+      if (err && !res.headersSent) res.status(404).end();
+    });
   });
 
   web.post("/api/messages", (req, res) => {
@@ -217,15 +174,15 @@ function createApp({ clipboard } = {}) {
     }
   });
 
+  // One bare 404 for every refusal, so the answer never says why or echoes a path;
+  // a send error (file gone mid-request) gets the same instead of Express's
+  // stack-trace page.
   web.get("/api/image", (req, res) => {
-    const p = req.query.path;
-    if (typeof p !== "string") return res.status(404).end();
-    const resolved = path.resolve(p);
-    if (!fs.existsSync(resolved)) return res.status(404).end();
-    if (!store.isUnderDataDir(resolved) && !referencedImagePaths().has(normalizeForCompare(resolved))) {
-      return res.status(404).end();
-    }
-    res.sendFile(resolved);
+    const file = store.servableMedia(req.query.path);
+    if (!file) return res.status(404).end();
+    res.sendFile(file, (err) => {
+      if (err && !res.headersSent) res.status(404).end();
+    });
   });
 
   web.get("/api/events", (req, res) => {

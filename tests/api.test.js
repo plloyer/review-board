@@ -12,6 +12,11 @@ const path = require("path");
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "review-board-api-test-"));
 process.env.REVIEW_BOARD_DATA_DIR = dir;
 process.env.REVIEW_BOARD_NO_SUMMARY = "1"; // never spawn the summarizer CLI in tests
+// /api/image's Game Bar captures root hangs off os.homedir() — a temp home keeps
+// the tests away from the real ~/Videos/Captures.
+const home = fs.mkdtempSync(path.join(os.tmpdir(), "review-board-api-home-"));
+process.env.USERPROFILE = home; // os.homedir() on Windows
+process.env.HOME = home; // and everywhere else
 
 const { createApp } = require("../server/web");
 const store = require("../server/store");
@@ -132,7 +137,7 @@ test("GET /api/image 404s on a missing path", async () => {
   });
 });
 
-test("GET /api/image serves a file under the data dir (an uploaded one), but 404s on a real, existing file outside it and not referenced by any message", async () => {
+test("GET /api/image serves an uploaded file, but 404s on a real, existing file outside the allowed roots", async () => {
   await withServer(async (base) => {
     const uploaded = await fetch(`${base}/api/upload`, {
       method: "POST",
@@ -152,14 +157,13 @@ test("GET /api/image serves a file under the data dir (an uploaded one), but 404
   });
 });
 
-test("GET /api/image serves a path referenced by a message's images even when outside the data dir", async () => {
+test("GET /api/image 404s on an image a message references outside the allowed roots (anyone can post that message)", async () => {
   await withServer(async (base) => {
     const srcDir = fs.mkdtempSync(path.join(os.tmpdir(), "review-board-outside-"));
     const outsideImg = path.join(srcDir, "shot.png");
     fs.writeFileSync(outsideImg, "bytes");
-    // A remote-machine path stays verbatim (ingestFile only copies locally-reachable
-    // files) — but this one IS locally reachable, so give it a fake unreachable stand-in
-    // by referencing it directly on a human message instead, which never runs ingestFile.
+    // A human message never runs ingestFile, so the path stays verbatim — that
+    // reference alone used to make /api/image serve any file on the host.
     const msg = await (
       await fetch(`${base}/api/messages`, {
         method: "POST",
@@ -169,7 +173,124 @@ test("GET /api/image serves a path referenced by a message's images even when ou
     ).json();
     assert.equal(msg.images[0].path, outsideImg);
     const res = await fetch(`${base}/api/image?path=${encodeURIComponent(outsideImg)}`);
-    assert.equal(res.status, 200);
+    assert.equal(res.status, 404);
+  });
+});
+
+test("GET /api/image 404s on the push private key and the other non-media files in the data dir", async () => {
+  await withServer(async (base) => {
+    // push.js wrote vapid-keys.json at require time; make sure the other two exist as well.
+    store.addAgentMessage({ title: "persist messages.json" });
+    if (!fs.existsSync(path.join(dir, "push-subscriptions.json"))) fs.writeFileSync(path.join(dir, "push-subscriptions.json"), "[]");
+    for (const name of ["vapid-keys.json", "messages.json", "push-subscriptions.json"]) {
+      const file = path.join(dir, name);
+      assert.ok(fs.existsSync(file), name);
+      const res = await fetch(`${base}/api/image?path=${encodeURIComponent(file)}`);
+      assert.equal(res.status, 404, name);
+      assert.equal(await res.text(), "", name);
+    }
+  });
+});
+
+test("GET /api/image 404s on ../ traversal out of uploads, raw or percent-encoded", async () => {
+  await withServer(async (base) => {
+    const uploads = path.join(dir, "uploads");
+    fs.mkdirSync(uploads, { recursive: true });
+    // A real image right beside uploads/: the extension alone must not be enough.
+    fs.writeFileSync(path.join(dir, "beside-uploads.png"), "png");
+    const up = encodeURIComponent(uploads);
+    for (const query of [
+      `${up}/../vapid-keys.json`,
+      `${up}%2F..%2Fvapid-keys.json`,
+      `${up}%5C..%5Cvapid-keys.json`,
+      `${up}%2F%2e%2e%2Fvapid-keys.json`,
+      `${up}%5C%2E%2E%5Cbeside-uploads.png`,
+      `${up}%252F..%252Fvapid-keys.json`,
+    ]) {
+      const res = await fetch(`${base}/api/image?path=${query}`);
+      assert.equal(res.status, 404, query);
+      assert.equal(await res.text(), "", query);
+    }
+  });
+});
+
+test("GET /api/image answers a NUL byte with a bare 4xx: no path, no stack trace", async () => {
+  await withServer(async (base) => {
+    const uploads = path.join(dir, "uploads");
+    fs.mkdirSync(uploads, { recursive: true });
+    fs.writeFileSync(path.join(uploads, "nul.png"), "png");
+    for (const query of [
+      `${encodeURIComponent(path.join(uploads, "nul.png"))}%00`,
+      `${encodeURIComponent(path.join(uploads, "nul"))}%00.png`,
+      `${encodeURIComponent(path.join(dir, "vapid-keys.json"))}%00.png`,
+    ]) {
+      const res = await fetch(`${base}/api/image?path=${query}`);
+      assert.ok(res.status >= 400 && res.status < 500, `${query} -> ${res.status}`);
+      assert.equal(await res.text(), "", query);
+    }
+  });
+});
+
+test("GET /api/image 404s on an upload whose extension is not plain media (html, svg, txt, none)", async () => {
+  await withServer(async (base) => {
+    for (const filename of ["page.html", "drawing.svg", "notes.txt", "test"]) {
+      const uploaded = await fetch(`${base}/api/upload`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ dataUrl: TINY_PNG_DATA_URL, filename }),
+      });
+      assert.equal(uploaded.status, 200, filename);
+      const { path: written } = await uploaded.json();
+      assert.ok(fs.existsSync(written), filename);
+      const res = await fetch(`${base}/api/image?path=${encodeURIComponent(written)}`);
+      assert.equal(res.status, 404, filename);
+    }
+  });
+});
+
+test("GET /api/image still serves an upload byte for byte, whatever the extension's case or the slashes", async () => {
+  await withServer(async (base) => {
+    for (const filename of ["shot.png", "PHOTO.JPG"]) {
+      const uploaded = await fetch(`${base}/api/upload`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ dataUrl: TINY_PNG_DATA_URL, filename }),
+      });
+      const { path: written } = await uploaded.json();
+      for (const p of [written, written.split(path.sep).join("/")]) {
+        const res = await fetch(`${base}/api/image?path=${encodeURIComponent(p)}`);
+        assert.equal(res.status, 200, p);
+        assert.deepEqual(Buffer.from(await res.arrayBuffer()), fs.readFileSync(written), p);
+      }
+    }
+  });
+});
+
+test("GET /api/image 404s on a file reached through a link inside uploads that points outside it", async () => {
+  await withServer(async (base) => {
+    const uploads = path.join(dir, "uploads");
+    fs.mkdirSync(uploads, { recursive: true });
+    const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), "review-board-elsewhere-"));
+    fs.writeFileSync(path.join(elsewhere, "secret.png"), "png");
+    const link = path.join(uploads, "escape-link");
+    fs.symlinkSync(elsewhere, link, "junction"); // a junction needs no admin rights on Windows; a plain dir symlink elsewhere
+    const res = await fetch(`${base}/api/image?path=${encodeURIComponent(path.join(link, "secret.png"))}`);
+    assert.equal(res.status, 404);
+  });
+});
+
+test("GET /api/image serves media in the Game Bar captures folder, nothing beside it", async () => {
+  await withServer(async (base) => {
+    const captures = path.join(home, "Videos", "Captures");
+    fs.mkdirSync(captures, { recursive: true });
+    const clip = path.join(captures, "Sovereign 2026-09-03 13-37-35.mp4");
+    fs.writeFileSync(clip, "mp4");
+    fs.writeFileSync(path.join(captures, "notes.txt"), "txt");
+    fs.writeFileSync(path.join(home, "Videos", "beside.png"), "png");
+    const get = (p) => fetch(`${base}/api/image?path=${encodeURIComponent(p)}`);
+    assert.equal((await get(clip)).status, 200);
+    assert.equal((await get(path.join(captures, "notes.txt"))).status, 404);
+    assert.equal((await get(path.join(home, "Videos", "beside.png"))).status, 404);
   });
 });
 
@@ -394,6 +515,43 @@ test("/api/file refuses a symlink/junction escape from uploads", async () => {
     fs.symlinkSync(outsideDir, link, process.platform === "win32" ? "junction" : "dir");
     const res = await fetch(`${base}/api/file?path=${encodeURIComponent(path.join(link, "private.tc"))}`);
     assert.equal(res.status, 404);
+  });
+});
+
+test("/api/file downloads only saves and media: a copied-in secret, an html upload or a NUL byte is a bare 4xx", async () => {
+  await withServer(async (base) => {
+    // send_message's ingestFile copies whatever local path it is handed into uploads/.
+    const secret = store.addAgentMessage({ title: "attach", images: [{ path: path.join(dir, "vapid-keys.json") }] }).images[0].path;
+    assert.equal(path.dirname(secret), path.join(dir, "uploads"));
+    const upload = async (filename) =>
+      (
+        await (
+          await fetch(`${base}/api/upload`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ dataUrl: TINY_PNG_DATA_URL, filename }),
+          })
+        ).json()
+      ).path;
+    const page = await upload("page.html");
+    const save = path.join(dir, "uploads", "nul-save.tc");
+    fs.writeFileSync(save, "save");
+    for (const query of [
+      encodeURIComponent(secret),
+      encodeURIComponent(page),
+      `${encodeURIComponent(save)}%00`,
+      `${encodeURIComponent(path.join(dir, "uploads", "nul-save"))}%00.tc`,
+    ]) {
+      const res = await fetch(`${base}/api/file?path=${query}`);
+      assert.ok(res.status >= 400 && res.status < 500, `${query} -> ${res.status}`);
+      assert.equal(await res.text(), "", query);
+    }
+    // Every upload's downloadUrl points here, so media still downloads.
+    const shot = await upload("shot.png");
+    const res = await fetch(`${base}/api/file?path=${encodeURIComponent(shot)}`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get("content-disposition"), 'attachment; filename="shot.png"');
+    assert.deepEqual(Buffer.from(await res.arrayBuffer()), fs.readFileSync(shot));
   });
 });
 
