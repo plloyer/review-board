@@ -10,6 +10,37 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const Views = require("../public/views");
 
+test("formatStamp is compact: time today, 'hier' yesterday, day and short month before that", () => {
+  const now = new Date(2026, 9, 2, 14, 0).getTime();
+  assert.equal(Views.formatStamp(new Date(2026, 9, 2, 9, 5).toISOString(), now), "09:05");
+  assert.equal(Views.formatStamp(new Date(2026, 9, 1, 22, 5).toISOString(), now), "hier 22:05");
+  assert.equal(Views.formatStamp(new Date(2026, 8, 28, 14, 30).toISOString(), now), "28 sept 14:30");
+  assert.equal(Views.formatStamp(undefined, now), "");
+});
+
+test("thread: every block carries its stamp, and a fold shows when its last note came in", () => {
+  global.marked = global.marked || { parse: (s) => s, parseInline: (s) => s };
+  const at1 = "2026-10-02T12:00:00.000Z", at2 = "2026-10-02T13:12:00.000Z", at3 = "2026-10-02T13:30:00.000Z";
+  const thread = [
+    { from: "agent", kind: "update", text: "a", at: at1 },
+    { from: "agent", kind: "update", text: "b", at: at2 },
+    { from: "agent", kind: "question", text: "Q?", at: at3 },
+  ];
+  const html = Views.threadHTML({ state: "in_progress", thread });
+  assert.match(html, new RegExp(`<span class="ts" data-at="${at3}">`));
+  assert.match(html, new RegExp(`<summary>2 notes de suivi<span class="ts" data-last="${at2}">`));
+  assert.doesNotMatch(html, /data-watch/, "a fold followed by later entries is not where a stall shows");
+
+  const tail = Views.threadHTML({ state: "in_progress", thread: thread.slice(0, 2) });
+  assert.match(tail, /data-last="[^"]+" data-watch>/, "the thread's last fold on a running card is watched for a stall");
+  assert.doesNotMatch(Views.threadHTML({ state: "approbation", thread: thread.slice(0, 2) }), /data-watch/);
+});
+
+test("lastNoteText says when the last note came in and how long ago", () => {
+  const at = new Date(2026, 9, 2, 9, 12).toISOString();
+  assert.equal(Views.lastNoteText(at, new Date(2026, 9, 2, 14, 20).getTime()), "dernière 09:12 · il y a 5h 8m");
+});
+
 test("thread: each run of consecutive agent updates folds under one closed 'notes de suivi' line, in place", () => {
   global.marked = global.marked || { parse: (s) => s, parseInline: (s) => s };
   const html = Views.threadHTML({

@@ -1204,10 +1204,15 @@ function renderOverlayBody(msg, blockedBy = []) {
   // B's overlay the moment B opens with A's textarea still sitting in the DOM.
   const sameCardDraft = prevTa && panel.dataset.msgId === String(msg.id) ? prevTa.value : "";
 
+  // A fold he opened stays open when a new note re-renders the same card.
+  const openFolds = panel.dataset.msgId === String(msg.id) ? [...panel.querySelectorAll(".log-fold")].map((d) => d.open) : [];
+
   const view = deriveOverlayView(msg, { blockedBy, pendingCounts: pendingCountsFor(msg.id) });
   panel.innerHTML = `<div class="overlay-scroll">${view.headerHTML}${view.bodyHTML}</div><div class="overlay-footer">${view.footerHTML}</div>`;
   panel.dataset.sig = JSON.stringify(view);
   panel.dataset.msgId = String(msg.id);
+  panel.querySelectorAll(".log-fold").forEach((d, i) => (d.open = !!openFolds[i]));
+  refreshStamps();
 
   const scrollEl = panel.querySelector(".overlay-scroll");
   if (scrollEl) scrollEl.scrollTop = scrollBefore;
@@ -1615,12 +1620,24 @@ document.addEventListener("visibilitychange", () => {
 });
 checkForNewBuild();
 
+// Relative times drift while the page sits open; a running card's last fold
+// turns orange once its agent has been quiet for 2 hours.
+const STALL_MS = 2 * 60 * 60 * 1000;
+function refreshStamps() {
+  for (const el of document.querySelectorAll(".ccard-run[data-since]")) el.textContent = window.Views.formatRunTime(el.dataset.since);
+  for (const el of document.querySelectorAll(".ts[data-at]")) el.textContent = window.Views.formatStamp(el.dataset.at);
+  for (const el of document.querySelectorAll(".ts[data-last]")) {
+    el.textContent = window.Views.lastNoteText(el.dataset.last);
+    el.classList.toggle("stale", el.hasAttribute("data-watch") && Date.now() - Date.parse(el.dataset.last) > STALL_MS);
+  }
+}
+
 // Belt-and-braces: if the SSE stream silently dies (observed in the always-visible
 // Electron window), nothing above ever fires again — poll as a last-resort sync.
 setInterval(() => {
   refresh();
   checkForNewBuild();
-  for (const el of document.querySelectorAll(".ccard-run[data-since]")) el.textContent = window.Views.formatRunTime(el.dataset.since);
+  refreshStamps();
 }, 10000);
 
 // Push notifications: needs a secure context (HTTPS, or localhost) — a plain

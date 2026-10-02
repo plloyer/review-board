@@ -286,6 +286,14 @@ header.drag-over { outline: 2px dashed #4a90d9; outline-offset: -2px; }
 .log-fold > summary:hover { color: #b6b6bc; }
 .thread .from-agent.log { color: #6c6c73; font-size: 12px; margin: 2px 0 2px 12px; }
 .thread .from-agent.for-you { color: #f4f4f6; font-size: 14px; line-height: 1.55; background: #24242a; border-radius: 8px; padding: 8px 12px; margin: 8px 0; }
+.thread .ts { font-size: 11px; line-height: 1.6; color: #5f5f66; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.thread-entry { position: relative; }
+.thread .thread-entry:has(> .ts) { padding-right: 96px; }
+.thread-entry > .ts { position: absolute; right: 0; top: 2px; }
+.thread .from-agent.for-you:has(> .ts) { padding-right: 108px; }
+.thread .from-agent.for-you > .ts { right: 12px; top: 10px; color: #7a7a82; }
+.log-fold > summary > .ts { float: right; }
+.log-fold > summary > .ts.stale { color: #b58a5a; }
 /* The human's own entries: neutral text, just a subtle green edge to tell the
    two voices apart without green-on-green reading strain. */
 .thread .from-human { color: #d7d7dc; border-left: 2px solid #3a5a3a; padding-left: 8px; }

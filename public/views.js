@@ -99,27 +99,52 @@ function detailsHTML(details) {
 // regardless of which body the message ends up in.
 // An agent's routine updates are a log he rarely reads: each consecutive run
 // folds, closed, under one line in place; its question/done is what he must read.
+// Stamps carry their ISO time so app.js's tick can keep "hier" / "il y a" current.
 function threadHTML(msg) {
   const out = [];
   let logs = [];
-  const flush = () => {
+  let lastAt = null;
+  const flush = (isTail) => {
     if (!logs.length) return;
     const n = logs.length;
-    out.push(`<details class="log-fold"><summary>${n} note${n > 1 ? "s" : ""} de suivi</summary>${logs.join("")}</details>`);
+    // Only the thread's last fold on a running card can show a stall.
+    const watch = isTail && msg.state === "in_progress" ? " data-watch" : "";
+    const stamp = lastAt ? `<span class="ts" data-last="${esc(lastAt)}"${watch}>${lastNoteText(lastAt)}</span>` : "";
+    out.push(`<details class="log-fold"><summary>${n} note${n > 1 ? "s" : ""} de suivi${stamp}</summary>${logs.join("")}</details>`);
     logs = [];
   };
   for (const t of msg.thread || []) {
     const isLog = t.from === "agent" && t.kind === "update";
     const tier = t.from === "agent" ? (isLog ? " log" : " for-you") : "";
-    const entry = `<div class="thread-entry from-${t.from}${tier}">${marked.parse(t.text, { breaks: true })}</div>`;
-    if (isLog) logs.push(entry);
-    else {
-      flush();
+    const stamp = t.at ? `<span class="ts" data-at="${esc(t.at)}">${formatStamp(t.at)}</span>` : "";
+    const entry = `<div class="thread-entry from-${t.from}${tier}">${marked.parse(t.text, { breaks: true })}${stamp}</div>`;
+    if (isLog) {
+      logs.push(entry);
+      lastAt = t.at || lastAt;
+    } else {
+      flush(false);
       out.push(entry);
     }
   }
-  flush();
+  flush(true);
   return out.join("");
+}
+
+const MONTHS = ["janv", "févr", "mars", "avr", "mai", "juin", "juil", "août", "sept", "oct", "nov", "déc"];
+
+function formatStamp(at, now = Date.now()) {
+  if (!at) return "";
+  const d = new Date(at);
+  const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  const day = (x) => new Date(x).setHours(0, 0, 0, 0);
+  const days = Math.round((day(now) - day(d)) / 86400000);
+  if (days === 0) return hm;
+  if (days === 1) return `hier ${hm}`;
+  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${hm}`;
+}
+
+function lastNoteText(at, now = Date.now()) {
+  return `dernière ${formatStamp(at, now)} · il y a ${formatRunTime(at, now)}`;
 }
 
 // Shared by overlayAgentBody/overlayHumanBody: the worker's retrospective,
@@ -697,6 +722,8 @@ const Views = {
   imagesHTML,
   isVideoPath,
   formatRunTime,
+  formatStamp,
+  lastNoteText,
   renderDetail,
   threadHTML,
   threadTail,
