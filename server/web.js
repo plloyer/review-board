@@ -44,6 +44,30 @@ function createApp({ clipboard } = {}) {
   web.get("/mcp-live", (_req, res) => res.status(405).end());
   web.delete("/mcp-live", (_req, res) => res.status(405).end());
 
+  // Long poll: immediately replay persisted events, otherwise wait for a committed change.
+  // No destructive MCP acknowledgement; each consumer owns its durable cursor.
+  web.get("/api/event-journal", (req, res) => {
+    const after = Number(req.query.after || 0);
+    const timeout = Number(req.query.timeout || 0);
+    if (!Number.isSafeInteger(after) || after < 0 || !Number.isFinite(timeout) || timeout < 0 || timeout > 25)
+      return res.status(400).json({ error: "invalid cursor or timeout" });
+    if (after > store.replayEvents(0).sequence)
+      return res.status(409).json({ error: "cursor ahead of journal" });
+    let timer;
+    const cleanup = () => { clearTimeout(timer); store.events.off("change", changed); };
+    const respond = () => { cleanup(); res.json(store.replayEvents(after)); };
+    const changed = () => { if (store.replayEvents(after).events.length) respond(); };
+    if (store.replayEvents(after).events.length || timeout === 0) return respond();
+    store.events.on("change", changed);
+    timer = setTimeout(respond, timeout * 1000);
+    res.on("close", cleanup);
+  });
+
+  web.post("/api/events/completion", (req, res) => {
+    try { res.json(store.publishCompletion(req.body || {})); }
+    catch (error) { res.status(400).json({ error: error.message }); }
+  });
+
   web.get("/api/reviews", (_req, res) => res.json(store.list()));
   web.get("/api/history", (_req, res) => res.json(store.history()));
 
@@ -119,7 +143,7 @@ function createApp({ clipboard } = {}) {
   web.delete("/api/messages/:id", (req, res) => {
     const msg = store.list().find((m) => m.id === req.params.id);
     if (msg && msg.direction !== "human") return res.status(400).json({ error: "not a human message" });
-    res.json({ removed: store.withdraw([req.params.id]) });
+    res.json({ removed: store.withdraw([req.params.id], "human") });
   });
 
   web.post("/api/messages/:id/archive", (req, res) => {
@@ -139,7 +163,7 @@ function createApp({ clipboard } = {}) {
       return res.status(400).json({ error: "invalid priority" });
     }
     try {
-      res.json(store.setPriority(req.params.id, priority));
+      res.json(store.setPriority(req.params.id, priority, "human"));
     } catch (err) {
       res.status(404).json({ error: String(err.message || err) });
     }

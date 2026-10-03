@@ -12,6 +12,7 @@ const {
   agentMoveNeedsApproval,
   agentApprovalRequiredText,
   retroRequiredText,
+  APPROVAL_TEXT_RE,
 } = require("../shared/lifecycle");
 const { agentRequiredText } = require("../shared/agents");
 
@@ -120,14 +121,91 @@ function load() {
   }
 }
 
-function save(state) {
+function cardSnapshot(value) {
+  return new Map([...value.history, ...value.messages].map(card => [card.id, JSON.stringify(card)]));
+}
+
+function save(state, metadata = {}) {
+  // Card bytes and their replay journal are committed by the SAME atomic rename.
+  // A process killed after persistence but before emit is recovered through replay.
+  const current = cardSnapshot(state);
+  for (const [id, bytes] of current) {
+    if (persistedCards.get(id) === bytes) continue;
+    const card = JSON.parse(bytes);
+    const previous = JSON.parse(persistedCards.get(id) || "null");
+    let author = metadata.author || "agent";
+    let kind = metadata.kind || "change";
+    if (!previous) {
+      author = metadata.author || (card.direction === "human" ? "human" : "agent");
+      kind = card.replyTo ? "delivery" : "created";
+    } else if (JSON.stringify(previous.reply) !== JSON.stringify(card.reply)) {
+      author = "human";
+      kind = card.reply && card.reply.decision === "approved" ? "approval" : "reply";
+    } else if ((card.thread || []).length > (previous.thread || []).length) {
+      const entry = card.thread[card.thread.length - 1];
+      author = metadata.author || entry.from;
+      kind = metadata.kind || (author === "human" ? (APPROVAL_TEXT_RE.test(entry.text.trim()) ? "approval" : "reply") : "agent_reply");
+    }
+    appendEvent({ cardId: card.replyTo || id, kind, author, state: card.state });
+  }
+  for (const id of persistedCards.keys()) {
+    if (!current.has(id)) appendEvent({ cardId: id, kind: "removed", author: metadata.author || "agent" });
+  }
+  writeState(state);
+  persistedCards = current;
+}
+
+function writeState(state) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const tmp = `${DATA_FILE}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
+  const descriptor = fs.openSync(tmp, "w");
+  try {
+    fs.writeFileSync(descriptor, JSON.stringify(state, null, 2));
+    fs.fsyncSync(descriptor);
+  } finally { fs.closeSync(descriptor); }
   fs.renameSync(tmp, DATA_FILE);
+  if (process.platform !== "win32") {
+    const directory = fs.openSync(DATA_DIR, "r");
+    try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
+  }
 }
 
 const state = load();
+state.eventSequence = state.eventSequence || 0;
+state.eventJournal = state.eventJournal || [];
+let persistedCards = cardSnapshot(state);
+
+function appendEvent(event) {
+  const record = { ...event, sequence: ++state.eventSequence, at: new Date().toISOString() };
+  state.eventJournal.push(record);
+  return record;
+}
+
+function replayEvents(after) {
+  return { sequence: state.eventSequence, events: state.eventJournal.filter(event => event.sequence > after).slice(0, 100) };
+}
+
+function publishCompletion({ cardId, role, report, digest, verdict, host, key }) {
+  if (!state.messages.some(card => card.id === cardId) && !state.history.some(card => card.id === cardId))
+    throw new Error("unknown card");
+  if (!["builder", "reviewer"].includes(role) || !/^u\d+$/.test(cardId) ||
+      !/^(REPORT|REVIEW)(?:-round\d+)?\.md$/.test(report || "") ||
+      !/^[a-f0-9]{64}$/.test(digest || "") || !/^[\w.-]{1,100}$/.test(host || "") ||
+      typeof verdict !== "string" || !/^[a-z_-]{1,30}$/.test(verdict) ||
+      typeof key !== "string" || key.length > 200 || !key.length) throw new Error("invalid completion");
+  const allowedVerdicts = role === "builder" ? ["done", "blocked", "red"] : ["accept", "fix", "reject"];
+  if (!allowedVerdicts.includes(verdict)) throw new Error("invalid verdict for role");
+  const existing = state.eventJournal.find(event => event.key === key);
+  if (existing) {
+    for (const field of ["cardId", "role", "report", "digest", "verdict", "host"])
+      if (existing[field] !== arguments[0][field]) throw new Error("completion key mismatch");
+    return existing;
+  }
+  const event = appendEvent({ cardId, kind: "completion", author: "agent", role, report, digest, verdict, host, key });
+  writeState(state);
+  emitChange();
+  return event;
+}
 const events = new EventEmitter();
 
 function emitChange() {
@@ -281,12 +359,12 @@ function setBlockers(id, ids) {
   return msg;
 }
 
-function setPriority(id, priority) {
+function setPriority(id, priority, actor = "agent") {
   const msg = state.messages.find((m) => m.id === id);
   if (!msg) throw new Error(`No message ${id}`);
   validatePriority(priority);
   msg.priority = priority;
-  save(state);
+  save(state, { author: actor, kind: "priority" });
   emitChange();
   return msg;
 }
@@ -323,7 +401,7 @@ function createTask({ title, context, project, blockedBy, priority, noReview, ta
   // landing/closing (see agentMoveNeedsApproval) — still an ordinary visible card.
   if (noReview) msg.noReview = true;
   state.messages.push(msg);
-  save(state);
+  save(state, { author: "agent", kind: "created" });
   emitChange();
   return msg;
 }
@@ -431,7 +509,7 @@ function moveTask(id, newState, note, opts = {}) {
 
   if (newState === "landing" || newState === "closed") queueUnblockNotices(dependents, wasBlocked);
 
-  save(state);
+  save(state, { kind: "move", author: actor });
   emitChange();
   return msg;
 }
@@ -521,7 +599,7 @@ function history() {
   return state.history;
 }
 
-function withdraw(ids) {
+function withdraw(ids, actor = "agent") {
   const idSet = new Set(ids);
   // A withdrawn id can itself be someone's blocker (freeing dependents) and/or
   // carry its own pending unblock notice (now moot — it's leaving the board).
@@ -531,7 +609,7 @@ function withdraw(ids) {
   state.messages = state.messages.filter((m) => !idSet.has(m.id));
   state.pendingUnblockNotices = state.pendingUnblockNotices.filter((n) => !idSet.has(n.id));
   queueUnblockNotices(dependents, wasBlocked);
-  save(state);
+  save(state, { author: actor, kind: "removed" });
   emitChange();
   return before - state.messages.length;
 }
@@ -642,7 +720,7 @@ function humanThreadNote(id, text) {
   // His answer IS what a questions-state card was waiting for — it goes back to
   // work automatically instead of squatting the Questions column answered.
   if (msg.state === "questions") msg.state = "in_progress";
-  save(state);
+  save(state, { author: "human" });
   emitChange();
   return msg;
 }
@@ -675,7 +753,7 @@ function reopen(id, note) {
   }
   const text = note && note.trim() ? note.trim() : "Rouvert — le build livré a encore des problèmes";
   msg.thread = [...(msg.thread || []), { from: "human", text, at: new Date().toISOString() }];
-  save(state);
+  save(state, { author: "human", kind: "reopen" });
   emitChange();
   return msg;
 }
@@ -686,7 +764,7 @@ function markThreadSeen(id) {
   const msg = state.messages.find((m) => m.id === id);
   if (!msg) throw new Error(`No message ${id}`);
   msg.threadSeenAt = new Date().toISOString();
-  save(state);
+  save(state, { author: "human", kind: "markThreadSeen" });
   emitChange();
   return msg;
 }
@@ -709,12 +787,14 @@ function archive(id) {
   const archived = { ...msg, archivedAt: now };
   if (msg.lastDeliveredAt) archived.deliveredAt = now;
   state.history.push(archived);
-  save(state);
+  save(state, { author: "human", kind: "archive" });
   emitChange();
   return msg;
 }
 
 module.exports = {
+  replayEvents,
+  publishCompletion,
   DATA_DIR,
   isUnderDataDir,
   servableMedia,
