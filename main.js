@@ -6,7 +6,8 @@ const url = require("url");
 const { createApp } = require("./server/web");
 const store = require("./server/store");
 const push = require("./server/push");
-const { isActionableThreadEntry, unseenActionable, agentAwaitingDecision } = require("./shared/lifecycle");
+const { watchForNotifications } = require("./server/notifier");
+const { unseenActionable, agentAwaitingDecision } = require("./shared/lifecycle");
 
 // Local-only debugging: lets a CDP client attach to inspect the renderer.
 app.commandLine.appendSwitch("remote-debugging-port", "9222");
@@ -40,31 +41,7 @@ function startServer() {
     push.notifyAll(title, body, tag).catch((err) => console.error("push error:", err));
   };
 
-  const notifiedIds = new Set();
-  let lastThreadNotifiedAt = new Date().toISOString();
-  store.events.on("change", () => {
-    // Same rule as the badge: only an agent card awaiting his decision (question
-    // or review) pings; an FYI note in in_progress stays silent.
-    const open = store.list().filter((m) => m.direction === "agent" && m.status === "open" && agentAwaitingDecision(m));
-    const openIds = new Set(open.map((m) => m.id));
-    for (const id of notifiedIds) if (!openIds.has(id)) notifiedIds.delete(id); // bound memory
-    for (const m of open) {
-      if (notifiedIds.has(m.id)) continue;
-      notifiedIds.add(m.id);
-      notify("Review board", m.title, m.id);
-    }
-    // An AI reply landing under one of the human's issues pings only when it's
-    // actually actionable (a question, or work done and awaiting validation).
-    for (const m of store.list()) {
-      if (m.direction !== "human" || !(m.thread || []).length) continue;
-      const last = m.thread[m.thread.length - 1];
-      if (isActionableThreadEntry(last) && last.at > lastThreadNotifiedAt) {
-        lastThreadNotifiedAt = last.at;
-        const title = last.kind === "question" ? "Review board — l'IA a besoin de toi" : "Review board — travail terminé";
-        notify(title, String(last.text || "").split("\n")[0], m.id);
-      }
-    }
-  });
+  watchForNotifications(notify);
 
   // Bind to all interfaces so phone/iPad on the same LAN can reach it too.
   // ponytail: no auth — fine on a home LAN, not something to expose past it.

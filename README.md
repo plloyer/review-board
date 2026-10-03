@@ -15,6 +15,17 @@ Opens a window on `http://localhost:5677`. Leave it running while you work —
 messages sent while it's closed just fail to reach it (v1 has no queue-while-closed
 or tray icon; see Skipped below).
 
+On an always-on server, run it without Electron instead:
+
+```bash
+ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci
+REVIEW_BOARD_DATA_DIR=/var/lib/review-board REVIEW_BOARD_NO_SUMMARY=1 node headless.js
+```
+
+Same web app, MCP endpoint and Web Push; no window, desktop notification or clipboard paste.
+It listens on `127.0.0.1:5677` (`REVIEW_BOARD_HOST`, `REVIEW_BOARD_PORT`): put a reverse proxy
+such as `tailscale serve` in front, since the board has no authentication.
+
 ## Point a coding session at it
 
 Add to that project's `.mcp.json`:
