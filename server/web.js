@@ -17,6 +17,20 @@ function createApp({ clipboard } = {}) {
   const web = express();
   // 4K screenshots pasted as base64 dataURLs easily pass 20 MB — keep headroom.
   web.use(express.json({ limit: "100mb" }));
+  // Branding for a deployment (home-screen icon, notification icon, installed app name):
+  // REVIEW_BOARD_ICON is a PNG path served as /icon.png, REVIEW_BOARD_TITLE the page title.
+  if (process.env.REVIEW_BOARD_ICON) {
+    web.get("/icon.png", (req, res) => res.sendFile(path.resolve(process.env.REVIEW_BOARD_ICON)));
+  }
+  if (process.env.REVIEW_BOARD_TITLE) {
+    const title = process.env.REVIEW_BOARD_TITLE.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+    web.get(["/", "/index.html"], (req, res) => {
+      const page = fs.readFileSync(path.join(__dirname, "..", "public", "index.html"), "utf8");
+      res.type("html").send(page
+        .replace(/<title>[^<]*<\/title>/, `<title>${title}</title>`)
+        .replace(/(name="apple-mobile-web-app-title" content=")[^"]*/, `$1${title}`));
+    });
+  }
   web.use(express.static(path.join(__dirname, "..", "public")));
   web.use("/shared", express.static(path.join(__dirname, "..", "shared")));
 

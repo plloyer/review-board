@@ -44,6 +44,28 @@ async function withServer(fn, opts) {
   }
 }
 
+test("REVIEW_BOARD_ICON and REVIEW_BOARD_TITLE brand the page", async () => {
+  const icon = path.join(dir, "brand.png");
+  fs.writeFileSync(icon, Buffer.from(TINY_PNG_DATA_URL.split(",")[1], "base64"));
+  process.env.REVIEW_BOARD_ICON = icon;
+  process.env.REVIEW_BOARD_TITLE = "Three <Crowns>";
+  try {
+    await withServer(async (base) => {
+      const served = Buffer.from(await (await fetch(`${base}/icon.png`)).arrayBuffer());
+      assert.deepEqual(served, fs.readFileSync(icon));
+      const page = await (await fetch(`${base}/`)).text();
+      assert.match(page, /<title>Three &#60;Crowns&#62;<\/title>/);
+      assert.match(page, /apple-mobile-web-app-title" content="Three &#60;Crowns&#62;"/);
+    });
+  } finally {
+    delete process.env.REVIEW_BOARD_ICON;
+    delete process.env.REVIEW_BOARD_TITLE;
+  }
+  await withServer(async (base) => {
+    assert.match(await (await fetch(`${base}/`)).text(), /<title>Review Board<\/title>/);
+  });
+});
+
 test("POST /api/messages requires text or images", async () => {
   await withServer(async (base) => {
     const empty = await fetch(`${base}/api/messages`, {
