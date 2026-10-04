@@ -10,6 +10,38 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const Views = require("../public/views");
 
+test("pending F7 shows report decisions, explicit priority and refusal reason, with no generic cancellation", () => {
+  const card = { id: "u-f7-view", direction: "human", kind: "message", title: "(player-filed) Court empty",
+    state: "report_review", reportApproval: { status: "pending" }, thread: [] };
+  const compact = Views.deriveCompactView(card);
+  assert.match(compact.actionsHTML, /Approuver ce rapport/);
+  assert.match(compact.actionsHTML, /Refuser/);
+  assert.equal(compact.cancelBtn, "");
+  assert.equal(compact.priorityChip, "");
+  const overlay = Views.deriveOverlayView(card);
+  assert.equal(Views.deriveCompactView(card).priorityChip, "");
+  assert.doesNotMatch(overlay.headerHTML, /chip-prio/);
+  assert.match(overlay.footerHTML, /Priorité du rapport/);
+  assert.match(overlay.footerHTML, /Motif du refus/);
+  assert.doesNotMatch(overlay.headerHTML, /overlayArchive/);
+  assert.match(overlay.bodyHTML, /attend l’approbation de PL/);
+});
+
+test("F7 decision receipt shows identity and time, escapes refusal text and never labels refusal as tested", () => {
+  const card = { id: "u-f7-receipt", direction: "human", kind: "message", title: "(player-filed) Court empty", state: "closed",
+    reportApproval: { status: "refused", by: "PL", at: "2026-10-04T16:00:00Z", reason: "<script>unsafe</script>" }, thread: [] };
+  const overlay = Views.deriveOverlayView(card);
+  assert.match(overlay.bodyHTML, /Rapport refusé par PL/);
+  assert.match(overlay.bodyHTML, /2026-10-04T16:00:00Z/);
+  assert.match(overlay.bodyHTML, /&lt;script&gt;/);
+  assert.equal(Views.deriveCompactView(card).priorityChip, "");
+  assert.doesNotMatch(overlay.headerHTML, /chip-prio/);
+  assert.doesNotMatch(overlay.headerHTML, /overlayReopen/);
+  assert.doesNotMatch(Views.deriveCompactView(card).actionsHTML, /Testé/);
+  const updated = Views.deriveOverlayView({ ...card, reportApproval: { ...card.reportApproval, reason: "Different" } });
+  assert.notDeepEqual(updated, overlay, "receipt fields participate in the view cache identity");
+});
+
 test("formatStamp is compact: time today, 'hier' yesterday, day and short month before that", () => {
   const now = new Date(2026, 9, 2, 14, 0).getTime();
   assert.equal(Views.formatStamp(new Date(2026, 9, 2, 9, 5).toISOString(), now), "09:05");

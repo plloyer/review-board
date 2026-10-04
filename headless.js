@@ -5,7 +5,8 @@
 //   REVIEW_BOARD_DATA_DIR=/var/lib/review-board REVIEW_BOARD_HOST=127.0.0.1 node headless.js
 //
 // REVIEW_BOARD_HOST defaults to 127.0.0.1: put a reverse proxy (e.g. `tailscale serve`) in front
-// rather than exposing the board, which has no authentication. REVIEW_BOARD_PORT defaults to 5677.
+// rather than exposing the board's general routes. F7 intake decisions require the
+// REVIEW_BOARD_PL_SECRET owner session. REVIEW_BOARD_PORT defaults to 5677.
 // Set REVIEW_BOARD_NO_SUMMARY=1 where no claude/codex CLI is logged in.
 const { createApp } = require("./server/web");
 const push = require("./server/push");

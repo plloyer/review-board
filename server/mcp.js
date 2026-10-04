@@ -143,15 +143,15 @@ function missingTextRefs(text) {
 // Stateless HTTP has no tools/list_changed channel, so the version rides every
 // await_replies trailer instead — a session that connected under an older
 // version learns from the delivery text that its cached tool list is stale.
-const TOOLS_VERSION = "v10"; // v10: updates fold under "notes de suivi"; question/done text is only what he must read
+const TOOLS_VERSION = "v11"; // v11: player-filed reports wait for authenticated PL intake approval
 
 function buildServer() {
   // The workflow travels with the MCP handshake so every client learns it without
   // needing the repo's WORKFLOW.md (kept in sync with that file, condensed).
   const WORKFLOW_INSTRUCTIONS = [
-    `Review-board workflow (tools ${TOOLS_VERSION}). States: backlog -> in_progress -> questions -> approbation -> landing -> closed.`,
+    `Review-board workflow (tools ${TOOLS_VERSION}). States: report_review (player-filed intake) -> backlog -> in_progress -> questions -> approbation -> landing -> closed.`,
     "Loop: await_replies (at-least-once: acknowledge_messages after reading, or items redeliver; ack = READ, never fixed).",
-    "Pick work: the human's feedback backlog cards outrank projet tasks. File your own tasks with create_task.",
+    "Pick work: the human's feedback backlog cards outrank projet tasks. Player-filed F7 cards start in report_review and require authenticated PL intake approval before any work or triage. Agent/player replies and no_review cannot grant it. File your own tasks with create_task.",
     "Dependencies: set_blockers / blocked_by on create_task/move_task (blocked until blockers reach landing/closed; you get a \"débloquée\" delivery). Priority: set_priority / priority 0-3 (0 = critical, 1 = highest, then in order).",
     "Tags (create_task/move_task tags, listed by list_messages as tags: a,b) say who CAN take a card: windows / mac / linux, unity (needs a Unity pass), or a machine name. Never start a card whose tags exclude your machine; no tag = anyone.",
     "Start a card: move_task in_progress with agent {vendor, model, effort} (required the first time: it draws who works the card; reply_to_message also takes agent when a card changes hands). Blocked on the human: reply_to_message kind question (auto-moves to questions). Progress notes: kind update (silent, folded away under a closed \"notes de suivi\" line; free-form). The text of a question or done is the bright box he must read: plain, friendly language, no jargon, and every piece of it needed for him to understand, nothing else (no tag prefixes like [3C-host] or (plloyer-desktop); a machine name, id or technical term only when he needs it), readable on its own without the updates.",
@@ -403,7 +403,7 @@ function buildServer() {
     "create_task",
     {
       description:
-        "Add a card to the human's backlog (state backlog). Defaults to taskKind projet; use feedback for a player's bug report, with context and optional save download link. His feedback cards always outrank project tasks — work feedback first.",
+        "Add a card to the human's backlog. Defaults to taskKind projet; use feedback for a player's bug report, with context and optional save download link. A (player-filed) title starts in report_review until PL approves it on the board; other feedback cards start in backlog and outrank project tasks.",
       inputSchema: {
         title: z.string(),
         taskKind: z.enum(["projet", "feedback"]).optional().describe("Defaults to projet. feedback files a real feedback/retours card."),

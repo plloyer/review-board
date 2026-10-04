@@ -7,16 +7,39 @@ const { buildServer, originalName } = require("./mcp");
 const store = require("./store");
 const push = require("./push");
 const { summarizeTitle } = require("./summarize");
+const { createOwnerSession } = require("./owner-session");
 
 const BUILD_ID = String(Date.now());
 const MAX_SAVE_BYTES = 32 * 1024 * 1024;
 
 // Extracted from main.js so it can be exercised with plain HTTP in tests, without
 // requiring electron (main.js still owns the window/notification/badge side effects).
-function createApp({ clipboard } = {}) {
+function createApp({ clipboard, ownerSecret = process.env.REVIEW_BOARD_PL_SECRET } = {}) {
   const web = express();
+  const owner = createOwnerSession(ownerSecret);
+  // Markdown comes from players and agents. It must never execute script using
+  // PL's signed session; all application scripts already load from this origin.
+  web.use((_req, res, next) => {
+    res.set("Content-Security-Policy", "script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'");
+    next();
+  });
   // 4K screenshots pasted as base64 dataURLs easily pass 20 MB — keep headroom.
   web.use(express.json({ limit: "100mb" }));
+  web.get("/api/owner/session", (req, res) => {
+    res.set("Cache-Control", "no-store");
+    res.json({ identity: owner.identity(req)?.id || null, enabled: owner.enabled });
+  });
+  web.post("/api/owner/session", (req, res) => owner.login(req, res));
+  web.delete("/api/owner/session", (_req, res) => {
+    res.clearCookie(owner.cookie, { path: "/api", httpOnly: true, sameSite: "strict" });
+    res.json({ identity: null });
+  });
+  web.post("/api/messages/:id/report-decision", (req, res) => {
+    const identity = owner.identity(req);
+    if (!identity) return res.status(403).json({ error: "Only authenticated PL can decide this report" });
+    try { res.json(store.decidePlayerReport(req.params.id, req.body || {}, identity)); }
+    catch (error) { res.status(400).json({ error: error.message }); }
+  });
   // Branding for a deployment (home-screen icon, notification icon, installed app name):
   // REVIEW_BOARD_ICON is a PNG path served as /icon.png, REVIEW_BOARD_TITLE the page title.
   if (process.env.REVIEW_BOARD_ICON) {

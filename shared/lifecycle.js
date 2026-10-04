@@ -16,10 +16,11 @@
 // and human-filed cards (feedback + agent-created project tasks) all carry one of these.
 // Two names because store.js and app.js grew their own vocabulary before this file
 // existed — same array, so validation (store) and column order (board) can never drift.
-const TASK_STATES = ["backlog", "in_progress", "questions", "approbation", "landing", "closed"];
+const TASK_STATES = ["report_review", "backlog", "in_progress", "questions", "approbation", "landing", "closed"];
 const COLUMN_STATES = TASK_STATES;
 
 const STATE_LABEL = {
+  report_review: "rapport à approuver",
   backlog: "backlog",
   in_progress: "in progress",
   questions: "questions",
@@ -27,6 +28,18 @@ const STATE_LABEL = {
   landing: "landing",
   closed: "closed",
 };
+
+function isPlayerReport(msg) {
+  return String(msg.title || "").startsWith("(player-filed) ") || Object.hasOwn(msg, "reportApproval");
+}
+
+function playerReportApproved(msg) {
+  if (!isPlayerReport(msg)) return true;
+  const approval = msg.reportApproval || {};
+  return approval.status === "approved" && approval.by === "PL" &&
+    typeof approval.at === "string" && approval.at.trim().length > 0 &&
+    Number.isInteger(approval.priority) && approval.priority >= 0 && approval.priority <= 3;
+}
 
 // A note is a progress update, not a question — it must never land in the
 // "questions" column (PL: a question card has to actually contain a question).
@@ -37,7 +50,7 @@ const KIND_TO_STATE = { question: "questions", review: "approbation", note: "in_
 function dotColor(msg) {
   if (msg.state === "closed") return null;
   if (msg.state === "backlog") return msg.taskKind === "feedback" ? "#6cbf6c" : "#8a8a90";
-  return { in_progress: "#4a90d9", questions: "#d9a441", approbation: "#6cbf6c", landing: "#b08fd9" }[msg.state] || "#8a8a90";
+  return { report_review: "#d9a441", in_progress: "#4a90d9", questions: "#d9a441", approbation: "#6cbf6c", landing: "#b08fd9" }[msg.state] || "#8a8a90";
 }
 
 // Last thread entry that's an AI question/done — the one shape that needs the
@@ -194,6 +207,7 @@ function extractPathRefs(text) {
 // flips it back; a card with no thread yet is never awaitingAgent, it's just
 // an ordinary active card.
 function awaitingAgent(msg) {
+  if (!playerReportApproved(msg)) return false;
   // Backlog is pull-based: no agent has picked the card up yet, so enriching it
   // is not "waiting on the AI" — it stays an ordinary backlog card until pickup.
   if (msg.state === "backlog") return false;
@@ -207,6 +221,8 @@ function awaitingAgent(msg) {
 }
 
 const Lifecycle = {
+  isPlayerReport,
+  playerReportApproved,
   TASK_STATES,
   COLUMN_STATES,
   STATE_LABEL,

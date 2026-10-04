@@ -20,11 +20,26 @@
       </form>
       <button id="notifyToggle">🔔 <span class="btn-label">Notifications</span></button>
       <button id="historyToggle">🕘 <span class="btn-label">History</span></button>
+      <button id="ownerSessionToggle">Connexion PL</button>
     </header>
     <div id="composeChips"></div>
     <div id="notifyStatus" hidden></div>
+    <dialog id="ownerDialog">
+      <form id="ownerLoginForm">
+        <h2>Connexion PL</h2>
+        <label>Secret de connexion <input id="ownerSecret" type="password" autocomplete="current-password" required /></label>
+        <p>Cette session permet à PL de décider quels rapports seront corrigés.</p>
+        <div class="reply-row"><button type="submit">Se connecter</button><button id="ownerLoginCancel" type="button">Annuler</button></div>
+      </form>
+    </dialog>
 
     <main id="board">
+      <section class="column" id="col-report_review" data-state="report_review">
+        <div class="column-header"><span class="column-title">Rapports à approuver</span><span class="column-count" id="count-report_review"></span></div>
+        <div class="column-scroll"><div class="column-cards" id="cards-report_review"></div>
+          <div class="column-answered" id="answered-report_review" hidden><span id="answered-count-report_review"></span><div class="column-cards" id="cards-answered-report_review"></div></div>
+        </div>
+      </section>
       <div class="col-rail" id="rail-backlog" data-state="backlog">
         <span class="rail-count" id="railcount-backlog"></span>
         <span class="rail-label">Backlog ›</span>

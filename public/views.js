@@ -213,6 +213,7 @@ function threadTail(msg) {
 // threaded r-card — its own context/question text, else a delivery-state hint
 // for a not-yet-threaded human card.
 function compactSubline(msg, tail) {
+  if (msg.state === "report_review") return { cls: "", text: "En attente de l’approbation de PL" };
   if (tail) {
     if (tail.kind === "human") return { cls: "sub-human", text: `↳ Toi : ${tail.snippet}` };
     if (tail.kind === "question") return { cls: "sub-question", text: `❓ ${tail.snippet}` };
@@ -378,8 +379,8 @@ function blockedBadgeHTML(blockedBy) {
   return blockedBy.map((id) => `<span class="blocked-badge" data-blocker-id="${esc(id)}">bloqué par ${esc(id)}</span>`).join(" ");
 }
 
-function archiveActionHTML() {
-  return `<div class="ccard-actions"><button class="archive-link-btn">Testé ✓ Archiver</button></div>`;
+function archiveActionHTML(label = "Testé ✓ Archiver") {
+  return `<div class="ccard-actions"><button class="archive-link-btn">${label}</button></div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -420,6 +421,7 @@ function messageFingerprint(msg, extra = {}) {
     msg.state,
     msg.status,
     msg.priority,
+    msg.reportApproval || null,
     msg.taskKind,
     msg.agent || null,
     msg.tags || null,
@@ -481,12 +483,12 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
       msg.state === "backlog" && msg.taskKind === "change-request"
         ? `<span class="chip chip-${msg.taskKind}">${esc(TASK_KIND_CHIP_LABEL[msg.taskKind] || msg.taskKind)}</span>`
         : "";
-    const priorityChip = priorityChipHTML(msg.priority);
+    const priorityChip = LocalLifecycle.playerReportApproved(msg) ? priorityChipHTML(msg.priority) : "";
     const agentMark = agentMarkHTML(msg.agent);
     const tagNote = tagNoteHTML(msg.tags);
     const runTime = runTimeHTML(msg);
     const undelivered = msg.direction === "human" && !msg.replyTo && !msg.lastDeliveredAt && !msg.acknowledgedAt;
-    const cancelBtn = undelivered ? `<button class="cancel-sent" title="Annuler">×</button>` : "";
+    const cancelBtn = undelivered && msg.state !== "report_review" ? `<button class="cancel-sent" title="Annuler">×</button>` : "";
 
     // Répondu subsection: his word is the latest event, the agent hasn't reacted
     // yet — grayed, no action row (except the one exception below), just a
@@ -521,7 +523,11 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
     const sub = compactSubline(msg, core.tail);
 
     let actionsHTML = "";
-    if (msg.state === "questions" && msg.direction === "agent") {
+    if (msg.state === "report_review" && LocalLifecycle.isPlayerReport(msg)) {
+      actionsHTML = `<div class="ccard-actions report-actions">
+        <button class="approve-report-btn">Approuver ce rapport</button>
+        <button class="refuse-report-btn">Refuser</button></div>`;
+    } else if (msg.state === "questions" && msg.direction === "agent") {
       actionsHTML = `
         <div class="ccard-actions">
           ${msg.kind === "review" ? `<button class="approve-btn">✅ Approve</button>` : ""}
@@ -548,7 +554,7 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
           <button class="open-overlay-fix">À corriger…</button>
         </div>`;
     } else if (msg.state === "closed") {
-      actionsHTML = archiveActionHTML();
+      actionsHTML = archiveActionHTML((msg.reportApproval || {}).status === "refused" ? "Archiver" : undefined);
     }
 
     return {
@@ -626,12 +632,12 @@ function overlayHeader(msg, blockedBy = []) {
         <strong class="overlay-title">${core.shortTitle}</strong>
         ${subtitle}
       </div>
-      ${msg.state === "backlog" ? prioritySelectorHTML(msg.priority) : priorityChipHTML(msg.priority)}
+      ${!LocalLifecycle.playerReportApproved(msg) ? "" : msg.state === "backlog" ? prioritySelectorHTML(msg.priority) : priorityChipHTML(msg.priority)}
       ${tagChipsHTML(msg.tags)}
       ${kindBadge}
       <span class="overlay-badge">${esc(STATE_LABEL[msg.state] || msg.state)}</span>
-      ${msg.state === "closed" ? `<span class="archive-link" id="overlayReopen">Reopen</span>` : ""}
-      ${msg.direction === "human" ? `<span class="archive-link" id="overlayArchive">Archiver</span>` : ""}
+      ${msg.state === "closed" && (msg.reportApproval || {}).status !== "refused" ? `<span class="archive-link" id="overlayReopen">Reopen</span>` : ""}
+      ${msg.direction === "human" && msg.state !== "report_review" ? `<span class="archive-link" id="overlayArchive">Archiver</span>` : ""}
       <button class="overlay-close" id="overlayClose">✕</button>
     </div>
     ${core.blocked ? `<div class="blocked-row">${blockedBadgeHTML(blockedBy)}</div>` : ""}`;
@@ -685,13 +691,23 @@ function overlayHumanBody(msg) {
   const approveBtn = core.canApprove ? `<button class="approve-issue-btn">✅ Approuver</button>` : "";
 
   const bodyHTML = `
+    ${reportReceiptHTML(msg)}
     ${msg.context ? `<div class="context md">${marked.parse(msg.context, { breaks: true })}</div>` : ""}
     ${images ? `<div class="images">${images}</div>` : ""}
     ${thread ? `<div class="thread">${thread}</div>` : ""}
     ${core.retroHTML}
   `;
 
-  const footerHTML = `
+  const footerHTML = msg.state === "report_review" && LocalLifecycle.isPlayerReport(msg)
+    ? `<div class="report-intake">
+        <label>Priorité <select class="report-priority" aria-label="Priorité du rapport">
+          <option value="0">P0 · Critique</option><option value="1">P1 · Haute</option>
+          <option value="2" selected>P2 · Normale</option><option value="3">P3 · Basse</option>
+        </select></label>
+        <label>Motif du refus <textarea class="report-reason growable-text" aria-label="Motif du refus" rows="2"></textarea></label>
+        <div class="reply-row"><button class="approve-report-btn">Approuver ce rapport</button>
+          <button class="refuse-report-btn">Refuser</button></div>
+      </div>` : `
     <div class="reply-row overlay-footer-row">
       ${approveBtn}
       <textarea class="growable-text comment-text" rows="1" placeholder="Commenter… (Ctrl+V ou glisse une image)"></textarea>
@@ -701,6 +717,17 @@ function overlayHumanBody(msg) {
   `;
 
   return { bodyHTML, footerHTML };
+}
+
+function reportReceiptHTML(msg) {
+  if (!LocalLifecycle.isPlayerReport(msg)) return "";
+  const receipt = msg.reportApproval || {};
+  if (receipt.status === "approved" || receipt.status === "refused") {
+    const status = receipt.status === "approved" ? "Rapport approuvé" : "Rapport refusé";
+    return `<div class="report-receipt">${status} par ${esc(receipt.by)} · <time datetime="${esc(receipt.at)}">${esc(receipt.at)}</time>${receipt.reason ? `<p>${esc(receipt.reason)}</p>` : ""}</div>`;
+  }
+  if (msg.state === "closed") return `<div class="report-receipt">Rapport déjà clos.</div>`;
+  return `<div class="report-receipt">Ce rapport attend l’approbation de PL. Aucun correctif ne démarre avant sa décision.</div>`;
 }
 
 function deriveOverlayView(msg, { blockedBy = [], pendingCounts } = {}) {
