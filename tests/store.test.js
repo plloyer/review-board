@@ -450,6 +450,15 @@ test("moveTask stamps startedAt on entry into in_progress only, so the card show
   assert.equal(store.moveTask(task.id, "questions").startedAt, first, "leaving in_progress does not restamp");
 });
 
+test("moveTask stamps stateSince when the state changes, not on a re-move", () => {
+  const { store } = freshStore();
+  const task = store.createTask({ title: "Do the thing" });
+  assert.equal(task.stateSince, undefined, "a new backlog card is timed from createdAt");
+  const entered = store.moveTask(task.id, "in_progress").stateSince;
+  assert.ok(entered);
+  assert.equal(store.moveTask(task.id, "in_progress").stateSince, entered);
+});
+
 test("moveTask throws on an unknown id or an unknown state", () => {
   const { store } = freshStore();
   const task = store.createTask({ title: "Do the thing" });
