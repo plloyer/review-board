@@ -128,6 +128,7 @@ function cardSnapshot(value) {
 function save(state, metadata = {}) {
   // Card bytes and their replay journal are committed by the SAME atomic rename.
   // A process killed after persistence but before emit is recovered through replay.
+  const sequence = state.eventSequence;
   const current = cardSnapshot(state);
   for (const [id, bytes] of current) {
     if (persistedCards.get(id) === bytes) continue;
@@ -151,8 +152,19 @@ function save(state, metadata = {}) {
   for (const id of persistedCards.keys()) {
     if (!current.has(id)) appendEvent({ cardId: id, kind: "removed", author: metadata.author || "agent" });
   }
-  writeState(state);
+  commitJournal(state, sequence);
   persistedCards = current;
+}
+
+// A failed state write takes its journal records back: a long poll must never serve an event a
+// restart would forget, or every consumer's cursor would sit past the head (HTTP 409).
+function commitJournal(state, sequence) {
+  try { writeState(state); }
+  catch (error) {
+    state.eventJournal = state.eventJournal.filter(event => event.sequence <= sequence);
+    state.eventSequence = sequence;
+    throw error;
+  }
 }
 
 function writeState(state) {
@@ -201,12 +213,15 @@ function publishCompletion({ cardId, role, report, digest, verdict, host, key })
       if (existing[field] !== arguments[0][field]) throw new Error("completion key mismatch");
     return existing;
   }
+  const sequence = state.eventSequence;
   const event = appendEvent({ cardId, kind: "completion", author: "agent", role, report, digest, verdict, host, key });
-  writeState(state);
+  commitJournal(state, sequence);
   emitChange();
   return event;
 }
 const events = new EventEmitter();
+// One listener per open long poll (every subscriber, waiter and watcher): no fixed cap.
+events.setMaxListeners(0);
 
 function emitChange() {
   events.emit("change");

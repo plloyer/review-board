@@ -90,3 +90,32 @@ test("agent-created task emits an agent event and thread delivery vehicles stay 
   assert.deepEqual(store.replayEvents(after).events.map(event => [event.cardId, event.kind, event.author]),
     [[card.id, "created", "agent"], [card.id, "delivery", "human"]]);
 });
+
+test("a failed state write takes its journal records back", () => {
+  const card = store.addAgentMessage({ title: "rollback" });
+  const before = store.replayEvents(0).sequence;
+  const rename = fs.renameSync;
+  fs.renameSync = () => { throw new Error("disk full"); };
+  try { assert.throws(() => store.reply(card.id, { text: "yes", decision: "approved" }), /disk full/); }
+  finally { fs.renameSync = rename; }
+  assert.equal(store.replayEvents(0).sequence, before);
+  assert.equal(store.replayEvents(before).events.length, 0);
+  store.reply(card.id, { text: "yes", decision: "approved" });
+  const records = store.replayEvents(before).events;
+  assert.equal(records[0].sequence, before + 1);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(directory, "messages.json"))).eventSequence, store.replayEvents(0).sequence);
+});
+
+test("many concurrent long polls raise no listener-leak warning", async () => {
+  const warnings = [];
+  const onWarning = warning => warnings.push(warning.name);
+  process.on("warning", onWarning);
+  await serverTest(async base => {
+    const after = store.replayEvents(0).sequence;
+    const polls = Array.from({ length: 15 }, () => fetch(`${base}/api/event-journal?after=${after}&timeout=1`));
+    await Promise.all(polls);
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  process.off("warning", onWarning);
+  assert.ok(!warnings.includes("MaxListenersExceededWarning"), warnings.join(","));
+});
