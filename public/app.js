@@ -1604,6 +1604,33 @@ document.addEventListener("visibilitychange", () => {
 });
 refresh();
 
+// Deep link #card=<id> (the project dashboard's cards use it): scroll to that card, flash it
+// and open it, waiting for the first render to put it on the page. The hash is then cleared
+// so the same link works again.
+async function openCardFromHash() {
+  const match = /^#card=(.+)$/.exec(location.hash);
+  if (!match) return;
+  const id = decodeURIComponent(match[1]);
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const target = document.querySelector(`[data-msg-id="${CSS.escape(id)}"]`);
+    if (target) {
+      history.replaceState(null, "", location.pathname + location.search);
+      const col = target.closest(".column");
+      if (col?.hidden) setCollapsed(col.dataset.state, false);
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      target.classList.add("flash");
+      setTimeout(() => {
+        target.classList.remove("flash");
+        target.click();
+      }, 500);
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+window.addEventListener("hashchange", openCardFromHash);
+openCardFromHash();
+
 // A page left open runs whatever JS it loaded — a server restart (new code) never
 // reaches it on its own. Piggyback the same triggers refresh() already uses to
 // check for a new build and reload before rendering with stale logic.
