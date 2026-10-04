@@ -29,8 +29,16 @@ const STATE_LABEL = {
   closed: "closed",
 };
 
+// F7 report titles: the current prefix, then the legacy one existing cards still carry (u769).
+const PLAYER_REPORT_TITLE_PREFIX = "F7 : ";
+const PLAYER_REPORT_TITLE_PREFIXES = [PLAYER_REPORT_TITLE_PREFIX, "(player-filed) "];
+
+function hasPlayerReportTitle(title) {
+  return PLAYER_REPORT_TITLE_PREFIXES.some((prefix) => String(title || "").startsWith(prefix));
+}
+
 function isPlayerReport(msg) {
-  return String(msg.title || "").startsWith("(player-filed) ") || Object.hasOwn(msg, "reportApproval");
+  return hasPlayerReportTitle(msg.title) || Object.hasOwn(msg, "reportApproval");
 }
 
 function playerReportApproved(msg) {
@@ -221,6 +229,9 @@ function awaitingAgent(msg) {
 }
 
 const Lifecycle = {
+  PLAYER_REPORT_TITLE_PREFIX,
+  PLAYER_REPORT_TITLE_PREFIXES,
+  hasPlayerReportTitle,
   isPlayerReport,
   playerReportApproved,
   TASK_STATES,

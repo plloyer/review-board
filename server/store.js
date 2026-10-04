@@ -83,7 +83,7 @@ const servableDownload = (p) => servablePath(p, [UPLOADS_DIR], DOWNLOAD_EXTENSIO
 // out of task-land entirely (no state). Mutates in place; the caller saves on next write.
 function migrateStates(s) {
   for (const m of s.messages) {
-    if (isPlayerReport(m) && !playerReportApproved(m) && m.state !== "closed") {
+    if (!m.replyTo && isPlayerReport(m) && !playerReportApproved(m) && m.state !== "closed") {
       m.reportApproval = { status: "pending" };
       m.state = "report_review";
       delete m.noReview;
@@ -613,7 +613,7 @@ function peekDeliverable() {
   // real delivery supersedes it (acknowledging the card's own id prunes the
   // notice too, same as always).
   const notices = state.pendingUnblockNotices
-    .filter((n) => !deliverableIds.has(n.id))
+    .filter((n) => !deliverableIds.has(n.id) && reportReleased(state.messages.find((m) => m.id === n.id)))
     .map((n) => ({ id: n.id, unblockNotice: true }));
   if (deliverable.length > 0) {
     const lastDeliveredAt = new Date().toISOString();
@@ -625,7 +625,8 @@ function peekDeliverable() {
 }
 
 function isDeliverable(m) {
-  if (!playerReportApproved(m)) return false;
+  // A thread reply is never a report itself: its parent's approval decides.
+  if (m.replyTo ? !reportReleased(threadParent(m), true) : !playerReportApproved(m)) return false;
   return (
     (m.direction === "agent" && m.status === "answered" && !m.acknowledgedAt) ||
     (m.direction === "human" && m.status === "open" && !m.acknowledgedAt)
@@ -634,6 +635,27 @@ function isDeliverable(m) {
 
 function history() {
   return state.history;
+}
+
+// The card a thread-reply delivery vehicle belongs to, live or archived; a reply
+// to a reply resolves to the card at the root of the thread.
+function threadParent(m) {
+  const seen = new Set();
+  let card = m;
+  while (card && card.replyTo && !seen.has(card.id)) {
+    seen.add(card.id);
+    card = state.messages.find((c) => c.id === card.replyTo) || state.history.find((c) => c.id === card.replyTo);
+  }
+  return card === m ? null : card;
+}
+
+// A player report and everything delivered on its behalf (thread follow-ups,
+// unblock notices) stay with PL until his intake approval; a refusal never
+// releases them. `whenGone` answers for a card no longer on the board or in
+// history: a notice for it is moot, an orphaned ordinary reply still delivers
+// (withdraw() retires the replies of an unapproved report with it).
+function reportReleased(card, whenGone = false) {
+  return card ? playerReportApproved(card) : whenGone;
 }
 
 function withdraw(ids, actor = "agent") {
@@ -645,13 +667,19 @@ function withdraw(ids, actor = "agent") {
   // carry its own pending unblock notice (now moot — it's leaving the board).
   const dependents = state.messages.filter((m) => !idSet.has(m.id) && (m.blockedBy || []).some((b) => idSet.has(b)));
   const wasBlocked = new Map(dependents.map((d) => [d.id, isBlocked(d, state.messages)]));
-  const before = state.messages.length;
-  state.messages = state.messages.filter((m) => !idSet.has(m.id));
+  const withdrawn = state.messages.filter((m) => idSet.has(m.id)).length;
+  // A withdrawn refused report takes its follow-ups along: without their parent
+  // they would otherwise be delivered as ordinary thread replies.
+  const unreleased = new Set(state.messages.filter((m) => idSet.has(m.id) && !playerReportApproved(m)).map((m) => m.id));
+  const orphans = state.messages.filter((m) => unreleased.has(m.replyTo));
+  const now = new Date().toISOString();
+  state.history.push(...orphans.map((m) => ({ ...m, archivedAt: now })));
+  state.messages = state.messages.filter((m) => !idSet.has(m.id) && !unreleased.has(m.replyTo));
   state.pendingUnblockNotices = state.pendingUnblockNotices.filter((n) => !idSet.has(n.id));
   queueUnblockNotices(dependents, wasBlocked);
   save(state, { author: actor, kind: "removed" });
   emitChange();
-  return before - state.messages.length;
+  return withdrawn;
 }
 
 // The agent confirms receipt of a deliverable item. An AGENT reply only retires to

@@ -2,11 +2,13 @@
 
 States: `report_review` (player-filed intake) -> `backlog` -> `in_progress` -> `questions` -> `approbation` -> `landing` -> `closed`.
 
-Player-filed F7 reports, identified by `(player-filed) ` titles, wait in intake
-until PL approves on the board with a priority, or refuses with a reason. Only
+Player-filed F7 reports, identified by `F7 : ` titles (or the legacy `(player-filed) `
+prefix on older cards), wait in intake until PL approves on the board with a priority,
+or refuses with a reason. Only
 his signed owner session records that decision; player/agent replies and generic
-approval text cannot grant it. These reports are not delivered to the agent inbox
-until approved. After intake, history triage is the first work step. Refusal closes
+approval text cannot grant it. These reports, their thread follow-ups and their
+unblock notices are not delivered to the agent inbox until approved; a refusal never
+releases them. After intake, history triage is the first work step. Refusal closes
 without claiming a delivered fix or a work retrospective. Intake consent does not
 approve completed work, so the ordinary review/landing gates below still apply.
 

@@ -33,7 +33,7 @@ const post = (base, route, body, key = KEY) => fetch(base + route, {
   body: typeof body === "string" ? body : JSON.stringify(body),
 });
 const get = (base, route, key = KEY) => fetch(base + route, { headers: key === null ? {} : { "X-Intake-Key": key } });
-const createCall = (context, title = "(player-filed) The siege never ends") => ({
+const createCall = (context, title = "F7 : The siege never ends") => ({
   jsonrpc: "2.0", id: 1, method: "tools/call",
   params: { name: "create_task", arguments: { title, taskKind: "feedback", context, project: "Three Crowns · player report" } },
 });
@@ -103,9 +103,10 @@ test("a report uploads its files, files one player card, and is found again by i
     const card = store.list().find((c) => c.id === id);
     assert.equal(card.taskKind, "feedback");
     assert.equal(card.project, "Three Crowns · player report");
-    assert.equal(card.state, "backlog");
+    assert.equal(card.state, "report_review", "a player card waits for PL's intake approval");
+    assert.deepEqual(card.reportApproval, { status: "pending" });
     assert.ok(!card.noReview, "a player card waits for the human's approval");
-    assert.ok(card.title.startsWith("(player-filed) "));
+    assert.equal(card.title, "F7 : The siege never ends");
 
     // A resend answers the same card instead of a duplicate.
     const again = await (await post(base, "/mcp", createCall(context))).json();
@@ -121,7 +122,11 @@ test("a report uploads its files, files one player card, and is found again by i
     const unmarked = await (await post(base, "/mcp", createCall("no marker here"))).json();
     assert.equal(unmarked.error.code, -32602);
     const untitled = await (await post(base, "/mcp", createCall(`[three-crowns-report:other] x`, "Crash"))).json();
-    assert.ok(store.list().find((c) => c.id === untitled.result.content[0].text).title.startsWith("(player-filed) Crash"));
+    assert.equal(store.list().find((c) => c.id === untitled.result.content[0].text).title, "F7 : Crash");
+    const legacy = await (await post(base, "/mcp", createCall(`[three-crowns-report:legacy] x`, "(player-filed) Old client"))).json();
+    const legacyCard = store.list().find((c) => c.id === legacy.result.content[0].text);
+    assert.equal(legacyCard.title, "F7 : Old client", "an older game's legacy prefix is filed under the F7 prefix");
+    assert.equal(legacyCard.state, "report_review");
   });
 });
 

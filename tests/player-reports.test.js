@@ -206,10 +206,108 @@ test("MCP creates pending player reports and refuses start despite fake approval
   });
 });
 
+test("both the F7 : prefix and the legacy (player-filed) prefix identify a player report", () => {
+  for (const title of ["F7 : Court empty", "(player-filed) Court empty"]) {
+    assert.equal(Lifecycle.isPlayerReport({ title }), true, title);
+    assert.equal(Lifecycle.playerReportApproved({ title }), false, title);
+    const card = store.createTask({ title, taskKind: "feedback", noReview: true, priority: 0 });
+    assert.equal(card.state, "report_review", title);
+    assert.equal(store.addHumanMessage(title, [], null).state, "report_review", title);
+  }
+  for (const title of ["F7: no space", "Re F7 : quoted", "player-filed without parentheses"]) {
+    assert.equal(Lifecycle.isPlayerReport({ title }), false, title);
+  }
+});
+
 test("ordinary feedback still enters backlog immediately", () => {
   const card = store.createTask({ title: "PL feedback", taskKind: "feedback" });
   assert.equal(card.state, "backlog");
   assert.equal(card.reportApproval, undefined);
+});
+
+const deliveredIds = () => store.peekDeliverable().map((entry) => entry.id);
+
+test("thread follow-ups to a pending report wait for PL's approval; refusal never releases them", () => {
+  const pending = report();
+  const queued = store.addHumanMessage("Re (player-filed) Court empty: reproduce and fix this report", [], pending.id);
+  assert.equal(deliveredIds().includes(queued.id), false);
+  assert.equal(store.acknowledge([queued.id]), 0);
+  store.decidePlayerReport(pending.id, { decision: "approved", priority: 1 }, PL);
+  assert.ok(deliveredIds().includes(queued.id), "an already-queued follow-up is released by PL's approval");
+
+  const refused = report();
+  const beforeRefusal = store.addHumanMessage("Re: please fix", [], refused.id);
+  store.decidePlayerReport(refused.id, { decision: "refused", reason: "Not a bug" }, PL);
+  const afterRefusal = store.addHumanMessage("Re: fix it anyway", [], refused.id);
+  assert.equal(deliveredIds().some((id) => id === beforeRefusal.id || id === afterRefusal.id), false);
+  store.archive(refused.id);
+  assert.equal(deliveredIds().some((id) => id === beforeRefusal.id || id === afterRefusal.id), false, "archiving a refused report keeps its follow-ups withheld");
+
+  const withdrawn = report();
+  const orphan = store.addHumanMessage("Re: still broken", [], withdrawn.id);
+  store.decidePlayerReport(withdrawn.id, { decision: "refused", reason: "Duplicate" }, PL);
+  assert.equal(store.withdraw([withdrawn.id]), 1);
+  assert.equal(deliveredIds().includes(orphan.id), false, "withdrawing a refused report never releases its follow-ups");
+
+  const ordinary = store.createTask({ title: "Ordinary task" });
+  const followUp = store.addHumanMessage("F7 : the same crash happens here", [], ordinary.id);
+  assert.equal(followUp.state, undefined, "a thread reply is a delivery vehicle even when its text starts with F7 : ");
+  assert.ok(deliveredIds().includes(followUp.id), "ordinary thread delivery is unchanged");
+});
+
+test("unblock notices for a pending report wait for PL's approval; ordinary and approved cards keep them", () => {
+  const blocker = store.createTask({ title: "Blocker" });
+  const pending = store.createTask({ title: "F7 : Blocked report", taskKind: "feedback", blockedBy: [blocker.id] });
+  const ordinary = store.createTask({ title: "Ordinary dependent", blockedBy: [blocker.id] });
+  assert.equal(pending.state, "report_review");
+  store.acknowledge([ordinary.id]);
+  store.archive(blocker.id);
+  assert.ok(JSON.parse(fs.readFileSync(path.join(directory, "messages.json"))).pendingUnblockNotices.some((notice) => notice.id === pending.id));
+  const delivered = store.peekDeliverable();
+  assert.equal(delivered.some((entry) => entry.id === pending.id), false);
+  assert.ok(delivered.some((entry) => entry.id === ordinary.id && entry.unblockNotice));
+
+  const approvedBlocker = store.createTask({ title: "Approved report's blocker" });
+  const approved = store.createTask({ title: "F7 : Approved blocked report", taskKind: "feedback", blockedBy: [approvedBlocker.id] });
+  store.decidePlayerReport(approved.id, { decision: "approved", priority: 2 }, PL);
+  store.acknowledge([approved.id]);
+  store.archive(approvedBlocker.id);
+  assert.ok(store.peekDeliverable().some((entry) => entry.id === approved.id && entry.unblockNotice));
+});
+
+test("persisted follow-ups and unblock notices of pending reports stay withheld after a restart", () => {
+  const persistedDirectory = path.join(directory, "persisted");
+  fs.mkdirSync(persistedDirectory);
+  fs.writeFileSync(path.join(persistedDirectory, "messages.json"), JSON.stringify({ nextHumanId: 6, nextAgentId: 1, history: [], messages: [
+    { id: "u1", title: "(player-filed) Legacy pending", direction: "human", status: "open", state: "report_review", reportApproval: { status: "pending" } },
+    { id: "u2", title: "Re (player-filed) Legacy pending: fix this", direction: "human", kind: "message", status: "open", replyTo: "u1" },
+    { id: "u3", title: "F7 : New pending", direction: "human", status: "open", state: "backlog" },
+    { id: "u4", title: "Re: fix this too", direction: "human", kind: "message", status: "open", replyTo: "u3" },
+    { id: "u5", title: "F7 : looks like an F7 bug", direction: "human", kind: "message", status: "open", replyTo: "u9" },
+  ], pendingUnblockNotices: [{ id: "u1", at: "2026-10-04T00:00:00Z" }, { id: "u3", at: "2026-10-04T00:00:00Z" }] }));
+  const script = `const store = require(${JSON.stringify(require.resolve("../server/store"))}); process.stdout.write(JSON.stringify({ delivered: store.peekDeliverable().map((m) => m.id), cards: store.list() }));`;
+  const after = JSON.parse(execFileSync(process.execPath, ["-e", script], { env: { ...process.env, REVIEW_BOARD_DATA_DIR: persistedDirectory }, encoding: "utf8" }));
+  assert.deepEqual(after.delivered, ["u5"]);
+  assert.equal(after.cards.find((card) => card.id === "u3").state, "report_review", "an F7 : title migrates into intake like the legacy prefix");
+  assert.equal(after.cards.find((card) => card.id === "u5").state, undefined, "a thread vehicle is never migrated into a card");
+});
+
+test("an unsigned HTTP follow-up to a pending report never reaches await_replies", async () => {
+  const pending = report();
+  await withServer(async (base) => {
+    const response = await post(base, "/api/messages", { text: "Re (player-filed) Court empty: reproduce and fix this report", replyTo: pending.id });
+    assert.equal(response.status, 200);
+    const vehicle = await response.json();
+    const client = new Client({ name: "delivery-fixture", version: "1" });
+    try {
+      await client.connect(new StreamableHTTPClientTransport(new URL(base + "/mcp")));
+      const awaited = await client.callTool({ name: "await_replies", arguments: { timeoutSeconds: 1 } });
+      const text = awaited.content.map((block) => block.text || "").join("\n");
+      assert.equal(text.includes(`[${vehicle.id}]`), false);
+      assert.equal(text.includes(`[${pending.id}]`), false);
+    } finally { await client.close(); }
+    assert.equal(pending.state, "report_review");
+  }, { ownerSecret: "" });
 });
 
 test.after(() => fs.rmSync(directory, { recursive: true, force: true }));
