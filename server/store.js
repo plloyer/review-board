@@ -512,6 +512,7 @@ function moveTask(id, newState, note, opts = {}) {
   const wasBlocked = new Map(dependents.map((d) => [d.id, isBlocked(d, state.messages)]));
 
   if (newState === "in_progress" && msg.state !== "in_progress") msg.startedAt = new Date().toISOString();
+  if (newState !== msg.state) msg.stateSince = new Date().toISOString();
   msg.state = newState;
   // Re-ask: an agent card the human already answered, sent back to "questions"
   // for another round. Without this, `status` stays "answered" and the badge/
@@ -829,6 +830,7 @@ function reopen(id, note) {
     throw new Error(`${id} can't be reopened from state "${msg.state}" — only a closed or landing card can be reopened`);
   }
   msg.state = "backlog";
+  msg.stateSince = new Date().toISOString();
   delete msg.agent;
   if (msg.direction === "agent") {
     if (msg.reply) msg.reply.decision = undefined;

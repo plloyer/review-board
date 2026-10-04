@@ -146,6 +146,13 @@ test("formatRunTime is compact: minutes, then hours and minutes, then days and h
   assert.equal(Views.formatRunTime(undefined, at(0)), "");
 });
 
+test("a backlog card shows how long it has waited, since stateSince else since creation", () => {
+  const base = { id: "u1", direction: "human", title: "T", state: "backlog", createdAt: "2026-09-24T10:00:00.000Z" };
+  assert.match(Views.deriveCompactView(base).runTime, /class="ccard-run ccard-wait" data-since="2026-09-24T10:00:00.000Z"/);
+  assert.match(Views.deriveCompactView({ ...base, stateSince: "2026-09-30T08:00:00.000Z" }).runTime, /data-since="2026-09-30T08:00:00.000Z"/);
+  assert.equal(Views.deriveCompactView({ ...base, state: "closed" }).runTime, "");
+});
+
 test("the compact card shows the run time only while in progress", () => {
   const base = { id: "u1", direction: "human", title: "T", startedAt: "2026-09-24T10:00:00.000Z" };
   assert.match(Views.deriveCompactView({ ...base, state: "in_progress" }).runTime, /class="ccard-run" data-since="2026-09-24T10:00:00.000Z"/);

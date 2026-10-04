@@ -24,3 +24,20 @@ server.on("error", (err) => {
   console.error(`listen error: ${err.code || err.message}`);
   process.exit(1);
 });
+
+// The public bug-report intake (server/intake.js), only when its port and key are configured:
+// REVIEW_BOARD_INTAKE_PORT, REVIEW_BOARD_INTAKE_KEY_FILE (one line, at least 32 characters) and
+// REVIEW_BOARD_PRIVATE_URL (the board's own root that card readers open, e.g. http://crowns:5677).
+// It listens on loopback only; `tailscale funnel` publishes it.
+if (process.env.REVIEW_BOARD_INTAKE_PORT) {
+  const fs = require("fs");
+  const { createIntakeApp } = require("./server/intake");
+  const intakePort = Number(process.env.REVIEW_BOARD_INTAKE_PORT);
+  const key = fs.readFileSync(process.env.REVIEW_BOARD_INTAKE_KEY_FILE, "utf8").trim();
+  const intake = createIntakeApp({ key, privateUrl: process.env.REVIEW_BOARD_PRIVATE_URL });
+  intake.listen(intakePort, "127.0.0.1", () => console.log(`Bug-report intake listening on http://127.0.0.1:${intakePort}`))
+    .on("error", (err) => {
+      console.error(`intake listen error: ${err.code || err.message}`);
+      process.exit(1);
+    });
+}

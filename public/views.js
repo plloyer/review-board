@@ -346,8 +346,14 @@ function formatRunTime(since, now = Date.now()) {
 
 // The text is filled and ticked by app.js, so the memoized card never freezes it.
 function runTimeHTML(msg) {
-  return msg.state === "in_progress" && msg.startedAt
-    ? `<span class="ccard-run" data-since="${esc(msg.startedAt)}">${formatRunTime(msg.startedAt)}</span>`
+  if (msg.state === "in_progress" && msg.startedAt) {
+    return `<span class="ccard-run" data-since="${esc(msg.startedAt)}">${formatRunTime(msg.startedAt)}</span>`;
+  }
+  // A backlog card shows, quietly, how long it has sat there: since it entered the column
+  // (stateSince), else since it was created (cards from before stateSince existed).
+  const waiting = msg.state === "backlog" && (msg.stateSince || msg.createdAt);
+  return waiting
+    ? `<span class="ccard-run ccard-wait" data-since="${esc(waiting)}" title="In the backlog for">${formatRunTime(waiting)}</span>`
     : "";
 }
 
@@ -426,6 +432,7 @@ function messageFingerprint(msg, extra = {}) {
     msg.agent || null,
     msg.tags || null,
     msg.startedAt || null,
+    msg.stateSince || null,
     msg.blockedBy || null,
     msg.summary,
     msg.title,

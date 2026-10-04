@@ -12,6 +12,35 @@ const { createOwnerSession } = require("./owner-session");
 const BUILD_ID = String(Date.now());
 const MAX_SAVE_BYTES = 32 * 1024 * 1024;
 
+// Validates and writes one `/api/upload` body; shared by the board and the public intake.
+// Answers {status, body}: 200 with {path, downloadUrl}, else the refusal.
+function storeUpload(requestBody, { mediaPattern = /^(?:image|video)\/\w+$/ } = {}) {
+  const { dataUrl, filename } = requestBody || {};
+  const match = typeof dataUrl === "string" && dataUrl.match(/^data:((?:image|video)\/\w+|application\/octet-stream);base64,(.+)$/);
+  if (!match || (filename && typeof filename !== "string")
+    || (match[1] !== "application/octet-stream" && !mediaPattern.test(match[1]))) {
+    return { status: 400, body: { error: "dataUrl (image, video, or application/octet-stream with a .tc filename) required" } };
+  }
+  const isSave = match[1] === "application/octet-stream";
+  if (isSave) {
+    if (!filename || !/\.tc$/i.test(filename)) return { status: 400, body: { error: "save filename must end in .tc" } };
+    if (match[2].length > Math.ceil(MAX_SAVE_BYTES / 3) * 4) {
+      return { status: 413, body: { error: "save exceeds 32 MiB" } };
+    }
+    if (match[2].length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(match[2])) {
+      return { status: 400, body: { error: "invalid save base64" } };
+    }
+  }
+  const bytes = Buffer.from(match[2], "base64");
+  if (isSave && bytes.length > MAX_SAVE_BYTES) return { status: 413, body: { error: "save exceeds 32 MiB" } };
+  const dir = path.join(store.DATA_DIR, "uploads");
+  fs.mkdirSync(dir, { recursive: true });
+  const safeName = `${Date.now()}-${(filename || match[1].replace("/", ".")).replace(/[^a-zA-Z0-9.\-_]/g, "_")}`;
+  const dest = store.uniqueUploadName(dir, safeName);
+  fs.writeFileSync(dest, bytes);
+  return { status: 200, body: { path: dest, downloadUrl: `/api/file?path=${encodeURIComponent(dest)}` } };
+}
+
 // Extracted from main.js so it can be exercised with plain HTTP in tests, without
 // requiring electron (main.js still owns the window/notification/badge side effects).
 function createApp({ clipboard, ownerSecret = process.env.REVIEW_BOARD_PL_SECRET } = {}) {
@@ -119,29 +148,8 @@ function createApp({ clipboard, ownerSecret = process.env.REVIEW_BOARD_PL_SECRET
   });
 
   web.post("/api/upload", (req, res) => {
-    const { dataUrl, filename } = req.body || {};
-    const match = typeof dataUrl === "string" && dataUrl.match(/^data:((?:image|video)\/\w+|application\/octet-stream);base64,(.+)$/);
-    if (!match || (filename && typeof filename !== "string")) {
-      return res.status(400).json({ error: "dataUrl (image, video, or application/octet-stream with a .tc filename) required" });
-    }
-    const isSave = match[1] === "application/octet-stream";
-    if (isSave) {
-      if (!filename || !/\.tc$/i.test(filename)) return res.status(400).json({ error: "save filename must end in .tc" });
-      if (match[2].length > Math.ceil(MAX_SAVE_BYTES / 3) * 4) {
-        return res.status(413).json({ error: "save exceeds 32 MiB" });
-      }
-      if (match[2].length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(match[2])) {
-        return res.status(400).json({ error: "invalid save base64" });
-      }
-    }
-    const bytes = Buffer.from(match[2], "base64");
-    if (isSave && bytes.length > MAX_SAVE_BYTES) return res.status(413).json({ error: "save exceeds 32 MiB" });
-    const dir = path.join(store.DATA_DIR, "uploads");
-    fs.mkdirSync(dir, { recursive: true });
-    const safeName = `${Date.now()}-${(filename || match[1].replace("/", ".")).replace(/[^a-zA-Z0-9.\-_]/g, "_")}`;
-    const dest = store.uniqueUploadName(dir, safeName);
-    fs.writeFileSync(dest, bytes);
-    res.json({ path: dest, downloadUrl: `/api/file?path=${encodeURIComponent(dest)}` });
+    const stored = storeUpload(req.body);
+    res.status(stored.status).json(stored.body);
   });
 
   // Same gate and bare 404s as /api/image, as an attachment download under the
@@ -279,4 +287,4 @@ function createApp({ clipboard, ownerSecret = process.env.REVIEW_BOARD_PL_SECRET
   return web;
 }
 
-module.exports = { createApp, BUILD_ID };
+module.exports = { createApp, storeUpload, BUILD_ID };
