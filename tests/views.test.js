@@ -95,6 +95,29 @@ test("feedback context is visible on compact, sent and overlay cards and its dow
   }
 });
 
+test("an image card markdown embeds is a capped thumbnail on every surface: context, thread, retro, details (u798)", () => {
+  const shot = "![Screenshot](/api/image?path=C%3A%2Fbugs%2Fscreenshot.png)";
+  const previousMarked = global.marked;
+  global.marked = require("../public/marked.min.js");
+  try {
+    const embedded = /<img class="embedded-image" src="\/api\/image\?path=C%3A%2Fbugs%2Fscreenshot.png" alt="Screenshot">/;
+    // An F7 report: the screenshot lives in the context, nowhere else.
+    const report = { id: "u798-f7", title: "F7 : army stuck", context: `Army stuck at the ford.\n\n${shot}`, direction: "human", createdBy: "agent", taskKind: "feedback", state: "backlog", status: "open" };
+    for (const html of [Views.deriveSentView(report, true).contextHTML, Views.deriveOverlayView(report).bodyHTML]) assert.match(html, embedded);
+    const agentCard = { ...report, id: "u798-agent", direction: "agent", status: "pending", details: [shot] };
+    assert.match(Views.deriveCardView(agentCard).contextHTML, embedded);
+    assert.match(Views.deriveCardView(agentCard).details, embedded);
+    assert.match(Views.renderDetail(`## Proof\n\n${shot}`).html, embedded);
+    assert.match(Views.threadHTML({ state: "in_progress", thread: [{ from: "agent", kind: "question", text: shot }] }), embedded);
+    assert.match(Views.overlayAgentBody({ ...agentCard, retro: shot }).bodyHTML, embedded);
+    // Every <img> markdown produced carries the class; nothing slips through at full size.
+    const body = Views.deriveOverlayView({ ...report, id: "u798-all", thread: [{ from: "human", text: shot }] }).bodyHTML;
+    assert.equal((body.match(/<img\b/g) || []).length, (body.match(/<img class="embedded-image"/g) || []).length);
+  } finally {
+    global.marked = previousMarked;
+  }
+});
+
 test("projet context is shown on the sent card and in the overlay; its subline stays the creation note", () => {
   const card = { id: "u634-projet", title: "Do X", context: "Run the smoke first", direction: "human", createdBy: "agent", taskKind: "projet", state: "backlog", status: "open" };
   assert.match(Views.deriveSentView(card, false).contextHTML, /Run the smoke first/);

@@ -187,7 +187,8 @@ function card(msg) {
   wireDropToAttach(el, msg.status === "answered" ? followupKey : msg.id);
   el.querySelectorAll(".pending-row").forEach((row) => renderPendingChips(row, row.dataset.pendingKey));
 
-  el.querySelectorAll(".thumb").forEach((img) =>
+  routeEmbeddedImages(el);
+  el.querySelectorAll(CARD_IMAGE).forEach((img) =>
     img.addEventListener("click", () => openLightbox(img.src, msg.id, msg.status !== "answered", galleryOf(el)))
   );
   el.querySelectorAll(".growable-text").forEach((ta) => ta.addEventListener("input", () => autoGrow(ta)));
@@ -390,12 +391,25 @@ async function uploadDataUrl(dataUrl, filename) {
   return path;
 }
 
+// An image card markdown embeds (views.js embedImages) opens the lightbox like the card's own
+// thumbs, except inside the thread, where an annotation rides on a comment instead.
+const CARD_IMAGE = ".thumb, .embedded-image:not(.thread .embedded-image)";
+
+// Agents embed proof images in markdown, sometimes as a bare local path: route those through
+// /api/image.
+function routeEmbeddedImages(root) {
+  root.querySelectorAll(".embedded-image").forEach((img) => {
+    const src = img.getAttribute("src") || "";
+    if (!/^(https?:|data:|\/api\/image)/i.test(src)) img.src = imgSrc(src);
+  });
+}
+
 // ponytail: single freehand red pen, no color/shape picker, no undo — add if it's
 // ever not enough for pointing at the thing in the screenshot.
 // Every image a card or overlay shows, in document order: the set the lightbox
 // arrows cycle through when one of them is opened.
 function galleryOf(root) {
-  return [...root.querySelectorAll(".thumb, .thread img")].map((i) => ({ src: i.src, label: i.alt, caption: i.title }));
+  return [...root.querySelectorAll(".thumb, .embedded-image")].map((i) => ({ src: i.src, label: i.alt, caption: i.title }));
 }
 
 function openLightbox(src, msgId, annotatable, gallery = []) {
@@ -450,6 +464,7 @@ function openLightbox(src, msgId, annotatable, gallery = []) {
   };
   function closeLightbox() {
     windowListeners.forEach(([type, handler]) => window.removeEventListener(type, handler));
+    window.removeEventListener("keydown", closeOnEscape, true);
     overlay.remove();
   }
 
@@ -457,6 +472,15 @@ function openLightbox(src, msgId, annotatable, gallery = []) {
     if (e.target === overlay) closeLightbox();
   };
   overlay.addEventListener("click", closeOnBackdrop);
+
+  // Esc closes the lightbox wherever it was opened from. Captured on window so a card overlay
+  // underneath (onOverlayKeydown, on document) stays open: a second Esc closes that.
+  function closeOnEscape(e) {
+    if (e.key !== "Escape") return;
+    e.stopPropagation();
+    closeLightbox();
+  }
+  window.addEventListener("keydown", closeOnEscape, true);
 
   // Pan/zoom: the image starts scaled to fit the screen (CSS max-width/height in
   // style.css), and scale/tx/ty are an additional transform on top of that — wheel
@@ -742,11 +766,8 @@ function sentCard(msg, delivered) {
       wirePasteToAttach(el.querySelector(".comment-text"), commentKey);
       el.querySelectorAll(".growable-text").forEach((ta) => ta.addEventListener("input", () => autoGrow(ta)));
       renderPendingChips(el.querySelector(".pending-row"), commentKey);
-      // Agents embed proof images in thread markdown, sometimes as a bare local
-      // path — route those through /api/image, and open all of them in the lightbox.
-      el.querySelectorAll(".thread img").forEach((img) => {
-        const src = img.getAttribute("src") || "";
-        if (!/^(https?:|data:|\/api\/image)/i.test(src)) img.src = imgSrc(src);
+      routeEmbeddedImages(el);
+      el.querySelectorAll(".thread .embedded-image").forEach((img) => {
         img.addEventListener("click", (e) => {
           e.stopPropagation();
           openLightbox(img.src, commentKey, true, galleryOf(el));
@@ -779,7 +800,7 @@ function sentCard(msg, delivered) {
   // Delegated on the persistent `el` (repainted via innerHTML, not recreated) so
   // this is wired exactly once regardless of how many times paint() re-renders.
   el.addEventListener("click", (e) => {
-    const thumb = e.target.closest(".thumb");
+    const thumb = e.target.closest(CARD_IMAGE);
     if (thumb) {
       // Annotations drawn here ride along with the card's next comment.
       openLightbox(thumb.src, commentKey, true, galleryOf(el));
@@ -1092,7 +1113,8 @@ let openCardId = null;
 // now signs with JSON.stringify(deriveOverlayView(m)))
 
 function wireOverlayMedia(panel, msg) {
-  panel.querySelectorAll(".thumb").forEach((img) =>
+  routeEmbeddedImages(panel);
+  panel.querySelectorAll(CARD_IMAGE).forEach((img) =>
     img.addEventListener("click", () =>
       openLightbox(
         img.src,
@@ -1102,9 +1124,7 @@ function wireOverlayMedia(panel, msg) {
       )
     )
   );
-  panel.querySelectorAll(".thread img").forEach((img) => {
-    const src = img.getAttribute("src") || "";
-    if (!/^(https?:|data:|\/api\/image)/i.test(src)) img.src = imgSrc(src);
+  panel.querySelectorAll(".thread .embedded-image").forEach((img) => {
     img.addEventListener("click", (e) => {
       e.stopPropagation();
       openLightbox(img.src, `comment:${msg.id}`, true, galleryOf(panel));
@@ -1265,13 +1285,7 @@ function renderOverlayBody(msg, blockedBy = []) {
 
 function onOverlayKeydown(e) {
   if (e.key !== "Escape") return;
-  // A lightbox opened from inside the overlay stacks on top of it — Esc closes
-  // just the lightbox first; a second Esc then closes the overlay itself.
-  const lightbox = document.querySelector(".lightbox");
-  if (lightbox) {
-    lightbox.click();
-    return;
-  }
+  // A lightbox stacked on top of the overlay takes the first Esc itself (openLightbox).
   closeOverlay();
 }
 

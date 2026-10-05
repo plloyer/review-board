@@ -27,6 +27,17 @@ function imgSrc(p) {
   return `/api/image?path=${encodeURIComponent(p)}`;
 }
 
+// Every image card markdown embeds (a player's F7 screenshot in the context, a proof image in a
+// thread entry, a retro or a detail) is a size-capped thumbnail the lightbox opens (style.css
+// .embedded-image, app.js EMBEDDED_IMAGE), never the image at full size inside the card.
+function embedImages(html) {
+  return html.replace(/<img\b/g, '<img class="embedded-image"');
+}
+
+function markdownHTML(text) {
+  return embedImages(marked.parse(String(text ?? ""), { breaks: true }));
+}
+
 // Escapes user/agent text interpolated into innerHTML that isn't already
 // markdown-rendered (marked.parse escapes on its own).
 function esc(s) {
@@ -76,11 +87,11 @@ function sourceChipHTML(tag) {
 // item unless it's block-level markdown (headings/lists/multiple paragraphs), in
 // which case it gets its own block instead of being crammed into a bullet.
 function renderDetail(d) {
-  const html = marked.parse(d, { breaks: true });
+  const html = markdownHTML(d);
   const paraCount = (html.match(/<p[\s>]/g) || []).length;
   const isBlock = /<h[1-6][\s>]/.test(html) || /<ul[\s>]/.test(html) || /<ol[\s>]/.test(html) || paraCount > 1;
   if (isBlock) return { block: true, html: `<div class="md">${html}</div>` };
-  return { block: false, html: `<li>${marked.parseInline(d, { breaks: true })}</li>` };
+  return { block: false, html: `<li>${embedImages(marked.parseInline(d, { breaks: true }))}</li>` };
 }
 
 // Splits a details[] array into the (items, blocks) HTML pair every detail-list
@@ -117,7 +128,7 @@ function threadHTML(msg) {
     const isLog = t.from === "agent" && t.kind === "update";
     const tier = t.from === "agent" ? (isLog ? " log" : " for-you") : "";
     const stamp = t.at ? `<span class="ts" data-at="${esc(t.at)}">${formatStamp(t.at)}</span>` : "";
-    const entry = `<div class="thread-entry from-${t.from}${tier}">${marked.parse(t.text, { breaks: true })}${stamp}</div>`;
+    const entry = `<div class="thread-entry from-${t.from}${tier}">${markdownHTML(t.text)}${stamp}</div>`;
     if (isLog) {
       logs.push(entry);
       lastAt = t.at || lastAt;
@@ -153,7 +164,7 @@ function lastNoteText(at, now = Date.now()) {
 // thread like any other card markdown. Empty when the card has none.
 function retroHTML(msg) {
   if (!msg.retro) return "";
-  return `<div class="retro"><div class="retro-label">Rétro</div>${marked.parse(msg.retro, { breaks: true })}</div>`;
+  return `<div class="retro"><div class="retro-label">Rétro</div>${markdownHTML(msg.retro)}</div>`;
 }
 
 // Full-size images grid: card()/overlayAgentBody tag each <img> with data-msg-id
@@ -589,7 +600,7 @@ function deriveCardView(msg, { pendingCounts } = {}) {
       kindBadge: core.kindLabel,
       title: core.fullTitle,
       project: msg.project ? `<span class="project">${esc(msg.project)}</span>` : "",
-      contextHTML: msg.context ? `<div class="context md">${marked.parse(msg.context, { breaks: true })}</div>` : "",
+      contextHTML: msg.context ? `<div class="context md">${markdownHTML(msg.context)}</div>` : "",
       details,
       detailBlocks,
       images: imagesHTML(msg.images, msg.id),
@@ -612,7 +623,7 @@ function deriveSentView(msg, delivered, { pendingCounts } = {}) {
       approveBtn: core.canApprove,
       unseenDot: core.unseenActionable,
       summaryTitle: core.summaryOrTitle,
-      contextHTML: msg.context ? `<div class="context md">${marked.parse(msg.context, { breaks: true })}</div>` : "",
+      contextHTML: msg.context ? `<div class="context md">${markdownHTML(msg.context)}</div>` : "",
       images: imagesHTML(msg.images),
       miniThumb: core.miniThumbHTML,
       thread: core.threadHTML,
@@ -655,7 +666,7 @@ function overlayAgentBody(msg) {
   const awaitingDecision = core.awaitingDecision;
 
   const bodyHTML = `
-    ${msg.context ? `<div class="context md">${marked.parse(msg.context, { breaks: true })}</div>` : ""}
+    ${msg.context ? `<div class="context md">${markdownHTML(msg.context)}</div>` : ""}
     ${detailItems ? `<ul>${detailItems}</ul>` : ""}
     ${detailBlocks}
     ${images ? `<div class="images">${images}</div>` : ""}
@@ -692,7 +703,7 @@ function overlayHumanBody(msg) {
   const approveBtn = core.canApprove ? `<button class="approve-issue-btn">✅ Approuver</button>` : "";
 
   const bodyHTML = `
-    ${msg.context ? `<div class="context md">${marked.parse(msg.context, { breaks: true })}</div>` : ""}
+    ${msg.context ? `<div class="context md">${markdownHTML(msg.context)}</div>` : ""}
     ${images ? `<div class="images">${images}</div>` : ""}
     ${thread ? `<div class="thread">${thread}</div>` : ""}
     ${core.retroHTML}
