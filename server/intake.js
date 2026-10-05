@@ -13,11 +13,11 @@
 const crypto = require("crypto");
 const express = require("express");
 const store = require("./store");
+const { PLAYER_REPORT_TITLE_PREFIX, PLAYER_REPORT_TITLE_PREFIXES } = require("../shared/lifecycle");
 const { storeUpload } = require("./web");
 
 const KEY_HEADER = "x-intake-key";
 const MARKER = /^\[three-crowns-report:[A-Za-z0-9-]{1,64}\]$/;
-const PLAYER_FILED_PREFIX = "(player-filed) ";
 const PROJECT = "Three Crowns · player report";
 const MAX_TITLE = 200;
 const MAX_CONTEXT = 64 * 1024;
@@ -59,6 +59,12 @@ function cardsWithMarker(marker) {
     [card.context, card.text, card.title].some((field) => typeof field === "string" && field.includes(marker)));
 }
 
+// Every filed report carries the current F7 prefix; an older game's legacy prefix is replaced.
+function reportTitle(title) {
+  const prefix = PLAYER_REPORT_TITLE_PREFIXES.find((candidate) => title.startsWith(candidate));
+  return PLAYER_REPORT_TITLE_PREFIX + (prefix ? title.slice(prefix.length) : title);
+}
+
 function rpcError(res, id, code, message) {
   return res.json({ jsonrpc: "2.0", id: id === undefined ? null : id, error: { code, message } });
 }
@@ -98,7 +104,7 @@ function createIntakeApp({
     // A resend of a report the board already holds answers the existing card instead of a duplicate.
     const existing = cardsWithMarker(marker)[0];
     const card = existing || store.createTask({
-      title: title.startsWith(PLAYER_FILED_PREFIX) ? title : PLAYER_FILED_PREFIX + title,
+      title: reportTitle(title),
       context,
       project: PROJECT,
       taskKind: "feedback",

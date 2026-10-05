@@ -19,6 +19,15 @@ header h1 { font-size: 16px; margin: 0; flex-shrink: 0; }
 }
 button { cursor: pointer; border: 1px solid #555; background: #333; color: #eee; border-radius: 8px; padding: 6px 10px; }
 button:hover { background: #444; }
+#ownerDialog { max-width: 360px; background: #1c1c1e; color: #ecebe8; border: 1px solid #555; border-radius: 8px; padding: 20px; }
+#ownerDialog::backdrop { background: #0008; }
+#ownerLoginForm, .report-intake { display: flex; flex-direction: column; gap: 12px; }
+#ownerLoginForm label, .report-intake label { display: flex; flex-direction: column; gap: 6px; }
+#ownerSecret, .report-priority { font: inherit; padding: 6px 10px; background: #111; color: #eee; border: 1px solid #555; border-radius: 6px; }
+.report-receipt { padding: 12px; border: 1px solid #6a5430; border-radius: 6px; color: #e5c27d; margin-bottom: 12px; }
+.report-receipt time { overflow-wrap: anywhere; }
+.report-actions { flex-wrap: wrap; }
+#col-report_review .column-header { --accent: #d9a441; }
 #composeChips { display: flex; gap: 8px; padding: 0 16px; flex-shrink: 0; }
 #composeChips:not(:empty) { padding-bottom: 12px; }
 #notifyStatus { margin: 0 16px 12px; padding: 8px 12px; background: #2a2a2d; border-radius: 6px; font-size: 13px; color: #ccc; flex-shrink: 0; }
@@ -343,6 +352,9 @@ body.overlay-open { overflow: hidden; }
 .img-missing { display: inline-block; background: #26262a; border: 1px dashed #44444a; border-radius: 6px; padding: 6px 10px; font-size: 11px; color: #8a8a90; margin: 4px 0; }
 
 @media (max-width: 900px) {
+  header { flex-wrap: wrap; gap: 8px; }
+  #compose { flex-basis: 100%; min-width: 0; }
+  #composeText { min-width: 0; }
   header h1 { display: none; }
   .btn-label { display: none; }
 

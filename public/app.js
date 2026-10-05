@@ -7,6 +7,75 @@ async function fetchJSON(url, opts) {
   return res.json();
 }
 
+let pendingOwnerAction = null;
+const ownerDialog = document.getElementById("ownerDialog");
+async function updateOwnerSession() {
+  const session = await fetchJSON("/api/owner/session");
+  document.getElementById("ownerSessionToggle").textContent = session.identity === "PL" ? "PL · Déconnexion" : "Connexion PL";
+  return session;
+}
+
+function requestOwnerSession(action) {
+  pendingOwnerAction = action || null;
+  document.getElementById("ownerSecret").value = "";
+  ownerDialog.showModal();
+  document.getElementById("ownerSecret").focus();
+}
+
+function cancelOwnerSession() {
+  document.getElementById("ownerSecret").value = "";
+  pendingOwnerAction = null;
+  ownerDialog.close();
+}
+document.getElementById("ownerLoginCancel").addEventListener("click", cancelOwnerSession);
+ownerDialog.addEventListener("cancel", cancelOwnerSession);
+document.getElementById("ownerLoginForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const input = document.getElementById("ownerSecret");
+  const secret = input.value;
+  input.value = "";
+  try {
+    await fetchJSON("/api/owner/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ secret }) });
+    ownerDialog.close();
+    await updateOwnerSession();
+    const action = pendingOwnerAction;
+    pendingOwnerAction = null;
+    if (action) await action();
+  } catch { showToast("Connexion PL refusée. Vérifie le secret de connexion."); }
+});
+document.getElementById("ownerSessionToggle").addEventListener("click", async () => {
+  const session = await updateOwnerSession();
+  if (session.identity === "PL") {
+    await fetchJSON("/api/owner/session", { method: "DELETE" });
+    await updateOwnerSession();
+  } else if (session.enabled) requestOwnerSession();
+  else showToast("La connexion PL doit être configurée sur le board.");
+});
+updateOwnerSession().catch(() => {});
+
+async function decideReport(msg, decision, panel) {
+  const reason = panel.querySelector(".report-reason").value.trim();
+  if (decision === "refused" && !reason) {
+    showToast("Indique le motif du refus.");
+    panel.querySelector(".report-reason").focus();
+    return;
+  }
+  const submit = async () => {
+    await fetchJSON(`/api/messages/${msg.id}/report-decision`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision, priority: Number(panel.querySelector(".report-priority").value), reason }),
+    });
+    closeOverlayIfOpen(msg.id);
+    await refresh(true);
+  };
+  try {
+    const session = await updateOwnerSession();
+    if (session.identity === "PL") await submit();
+    else if (session.enabled) requestOwnerSession(submit);
+    else showToast("La connexion PL doit être configurée sur le board.");
+  } catch { showToast("La décision n’a pas été enregistrée. Recharge le rapport et réessaie."); }
+}
+
 // msg.id -> array of server-side file paths queued to go out with that reply.
 const pendingImages = new Map();
 
@@ -924,6 +993,11 @@ function compactCard(msg, blockedInfo) {
   `;
 
   wireBlockedBadges(el);
+  if (msg.state === "report_review") {
+    el.querySelectorAll(".approve-report-btn, .refuse-report-btn").forEach((button) => {
+      button.addEventListener("click", (event) => { event.stopPropagation(); openOverlay(msg, el, blockedInfo); });
+    });
+  }
 
   // A Répondu card renders actionsHTML: "" except when msg.state is "closed"
   // (wired unconditionally below, since that's the one action it keeps) —
@@ -1138,6 +1212,11 @@ function wireOverlayMedia(panel, msg) {
 }
 
 function wireOverlayFooter(panel, msg) {
+  if (msg.state === "report_review" && window.Lifecycle.isPlayerReport(msg)) {
+    panel.querySelector(".approve-report-btn").addEventListener("click", () => decideReport(msg, "approved", panel));
+    panel.querySelector(".refuse-report-btn").addEventListener("click", () => decideReport(msg, "refused", panel));
+    return;
+  }
   if (msg.direction === "agent") {
     if (msg.status === "answered" && !agentAwaitingDecision(msg)) {
       const followupKey = `followup:${msg.id}`;
@@ -1219,6 +1298,8 @@ function renderOverlayBody(msg, blockedBy = []) {
   const prevScroll = panel.querySelector(".overlay-scroll");
   const scrollBefore = prevScroll ? prevScroll.scrollTop : 0;
   const prevTa = panel.querySelector("textarea");
+  const prevPriority = panel.querySelector(".report-priority");
+  const sameCard = panel.dataset.msgId === String(msg.id);
   // Keyed to the message the draft belonged to — the panel is a single reused
   // DOM node, so an unkeyed harvest here would leak card A's draft into card
   // B's overlay the moment B opens with A's textarea still sitting in the DOM.
@@ -1237,9 +1318,12 @@ function renderOverlayBody(msg, blockedBy = []) {
   const scrollEl = panel.querySelector(".overlay-scroll");
   if (scrollEl) scrollEl.scrollTop = scrollBefore;
   const ta = panel.querySelector("textarea");
+  const priority = panel.querySelector(".report-priority");
+  if (priority && prevPriority && sameCard) priority.value = prevPriority.value;
   // Same-card typing wins; otherwise fall back to a draft stranded by a column
   // move into a composer-less card shape (see reconcileSection/pendingDrafts).
-  const draft = sameCardDraft || pendingDrafts.get(String(msg.id)) || "";
+  const sameComposer = prevTa && ta && prevTa.classList.contains("report-reason") === ta.classList.contains("report-reason");
+  const draft = (sameComposer ? sameCardDraft : "") || pendingDrafts.get(String(msg.id)) || "";
   if (ta && draft) {
     ta.value = draft;
     autoGrow(ta);

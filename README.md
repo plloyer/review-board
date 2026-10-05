@@ -24,7 +24,14 @@ REVIEW_BOARD_DATA_DIR=/var/lib/review-board REVIEW_BOARD_NO_SUMMARY=1 node headl
 
 Same web app, MCP endpoint and Web Push; no window, desktop notification or clipboard paste.
 It listens on `127.0.0.1:5677` (`REVIEW_BOARD_HOST`, `REVIEW_BOARD_PORT`): put a reverse proxy
-such as `tailscale serve` in front, since the board has no authentication.
+such as `tailscale serve` in front. Existing routes assume human callers; player-filed
+report intake requires a signed PL session. Configure `REVIEW_BOARD_PL_SECRET` with
+a private random secret of at least 32 characters, then use **Connexion PL** in the
+board. Without it, intake decisions are refused. F7 reports wait in `report_review`
+until PL approves with a priority or refuses with a reason. Generic replies/moves
+cannot approve them. Browser logout clears the cookie; secret rotation revokes all
+sessions. Use HTTPS for login; cookies expire after seven days. The separate intake
+decision does not approve the eventual fix.
 `REVIEW_BOARD_ICON` (a PNG path) and `REVIEW_BOARD_TITLE` replace the icon and the name a
 phone shows for the board added to its home screen (and the notification icon).
 
