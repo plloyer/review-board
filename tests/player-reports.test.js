@@ -249,10 +249,57 @@ test("thread follow-ups to a pending report wait for PL's approval; refusal neve
   assert.equal(store.withdraw([withdrawn.id]), 1);
   assert.equal(deliveredIds().includes(orphan.id), false, "withdrawing a refused report never releases its follow-ups");
 
+  const deepWithdrawn = report();
+  const child = store.addHumanMessage("Re: fix this", [], deepWithdrawn.id);
+  const grandchild = store.addHumanMessage("Re Re: fix this now", [], child.id);
+  const greatGrandchild = store.addHumanMessage("Re Re Re: still waiting", [], grandchild.id);
+  store.decidePlayerReport(deepWithdrawn.id, { decision: "refused", reason: "Not a bug" }, PL);
+  assert.equal(store.withdraw([deepWithdrawn.id]), 1);
+  const delivered = deliveredIds();
+  assert.equal(delivered.includes(grandchild.id), false, "withdrawing a refused report never releases a reply to a reply (depth 2)");
+  assert.equal(delivered.includes(greatGrandchild.id), false, "withdrawing a refused report never releases depth 3");
+  assert.equal(store.list().some((m) => [child.id, grandchild.id, greatGrandchild.id].includes(m.id)), false, "the whole thread retires with its report");
+
   const ordinary = store.createTask({ title: "Ordinary task" });
   const followUp = store.addHumanMessage("F7 : the same crash happens here", [], ordinary.id);
   assert.equal(followUp.state, undefined, "a thread reply is a delivery vehicle even when its text starts with F7 : ");
   assert.ok(deliveredIds().includes(followUp.id), "ordinary thread delivery is unchanged");
+});
+
+test("removing any node of a report's thread (archive, withdraw, acknowledge) never releases replies to replies", () => {
+  const thread = () => {
+    const root = report();
+    const child = store.addHumanMessage("Re: a", [], root.id);
+    const grandchild = store.addHumanMessage("Re: b", [], child.id);
+    const greatGrandchild = store.addHumanMessage("Re: c", [], grandchild.id);
+    return { root, child, deep: [grandchild.id, greatGrandchild.id] };
+  };
+  const withheld = (ids) => !deliveredIds().some((id) => ids.includes(id));
+  const released = (ids) => ids.every((id) => deliveredIds().includes(id));
+
+  const archivedRoot = thread();
+  store.decidePlayerReport(archivedRoot.root.id, { decision: "refused", reason: "Not a bug" }, PL);
+  store.archive(archivedRoot.root.id);
+  assert.ok(withheld(archivedRoot.deep), "archiving a refused report keeps depth 2 and 3 withheld");
+
+  const archivedMiddle = thread();
+  store.archive(archivedMiddle.child.id);
+  assert.ok(withheld(archivedMiddle.deep), "archiving a middle vehicle of a pending report keeps depth 2 and 3 withheld");
+  store.decidePlayerReport(archivedMiddle.root.id, { decision: "approved", priority: 1 }, PL);
+  assert.ok(released(archivedMiddle.deep), "approval still releases them");
+
+  const withdrawnMiddle = thread();
+  assert.equal(store.withdraw([withdrawnMiddle.child.id]), 1);
+  assert.ok(withheld(withdrawnMiddle.deep), "withdrawing a middle vehicle of a pending report keeps depth 2 and 3 withheld");
+  store.decidePlayerReport(withdrawnMiddle.root.id, { decision: "approved", priority: 1 }, PL);
+  assert.ok(released(withdrawnMiddle.deep), "approval still releases them");
+
+  const acknowledged = thread();
+  assert.equal(store.acknowledge([acknowledged.child.id]), 0, "a withheld middle vehicle cannot be acknowledged away");
+  assert.ok(withheld(acknowledged.deep));
+  store.decidePlayerReport(acknowledged.root.id, { decision: "approved", priority: 1 }, PL);
+  assert.equal(store.acknowledge([acknowledged.child.id]), 1);
+  assert.ok(released(acknowledged.deep), "after approval, acknowledging the middle vehicle leaves the deeper replies delivered");
 });
 
 test("unblock notices for a pending report wait for PL's approval; ordinary and approved cards keep them", () => {

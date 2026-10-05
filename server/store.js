@@ -653,7 +653,7 @@ function threadParent(m) {
 // unblock notices) stay with PL until his intake approval; a refusal never
 // releases them. `whenGone` answers for a card no longer on the board or in
 // history: a notice for it is moot, an orphaned ordinary reply still delivers
-// (withdraw() retires the replies of an unapproved report with it).
+// (withdraw() retires the whole thread of an unapproved report with it).
 function reportReleased(card, whenGone = false) {
   return card ? playerReportApproved(card) : whenGone;
 }
@@ -668,13 +668,18 @@ function withdraw(ids, actor = "agent") {
   const dependents = state.messages.filter((m) => !idSet.has(m.id) && (m.blockedBy || []).some((b) => idSet.has(b)));
   const wasBlocked = new Map(dependents.map((d) => [d.id, isBlocked(d, state.messages)]));
   const withdrawn = state.messages.filter((m) => idSet.has(m.id)).length;
-  // A withdrawn refused report takes its follow-ups along: without their parent
-  // they would otherwise be delivered as ordinary thread replies.
-  const unreleased = new Set(state.messages.filter((m) => idSet.has(m.id) && !playerReportApproved(m)).map((m) => m.id));
-  const orphans = state.messages.filter((m) => unreleased.has(m.replyTo));
+  // A withdrawn unreleased report takes its whole thread along, replies to
+  // replies included: without their root they would otherwise be delivered as
+  // ordinary thread replies. A withdrawn vehicle inside a still-unreleased
+  // thread retires to history instead, so the replies below it still resolve
+  // to the report and keep waiting for PL's decision.
+  const unreleased = new Set(state.messages.filter((m) => idSet.has(m.id) && !m.replyTo && !playerReportApproved(m)).map((m) => m.id));
+  const orphans = state.messages.filter((m) => !idSet.has(m.id) && m.replyTo && unreleased.has(threadParent(m)?.id));
+  const heldVehicles = state.messages.filter((m) => idSet.has(m.id) && m.replyTo && !unreleased.has(threadParent(m)?.id) && !reportReleased(threadParent(m), true));
+  const retired = new Set([...orphans, ...heldVehicles].map((m) => m.id));
   const now = new Date().toISOString();
-  state.history.push(...orphans.map((m) => ({ ...m, archivedAt: now })));
-  state.messages = state.messages.filter((m) => !idSet.has(m.id) && !unreleased.has(m.replyTo));
+  state.history.push(...[...orphans, ...heldVehicles].map((m) => ({ ...m, archivedAt: now })));
+  state.messages = state.messages.filter((m) => !idSet.has(m.id) && !retired.has(m.id));
   state.pendingUnblockNotices = state.pendingUnblockNotices.filter((n) => !idSet.has(n.id));
   queueUnblockNotices(dependents, wasBlocked);
   save(state, { author: actor, kind: "removed" });
