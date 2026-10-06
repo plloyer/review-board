@@ -492,7 +492,8 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
     const agentMark = agentMarkHTML(msg.agent);
     const tagNote = tagNoteHTML(msg.tags);
     const runTime = runTimeHTML(msg);
-    const undelivered = msg.direction === "human" && !msg.replyTo && !msg.lastDeliveredAt && !msg.acknowledgedAt;
+    // The × belongs to backlog cards only: once a card left backlog it never shows.
+    const undelivered = msg.state === "backlog" && msg.direction === "human" && !msg.replyTo && !msg.lastDeliveredAt && !msg.acknowledgedAt;
     const cancelBtn = undelivered ? `<button class="cancel-sent" title="Annuler">×</button>` : "";
 
     // Répondu subsection: his word is the latest event, the agent hasn't reacted

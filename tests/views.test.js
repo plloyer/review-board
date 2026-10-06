@@ -347,6 +347,14 @@ test("deriveCompactView: an awaiting card never gets a cancel button, even when 
   assert.equal(view.cancelBtn, "");
 });
 
+test("deriveCompactView: the cancel x shows only on backlog cards, never once a card left backlog", () => {
+  const base = { id: "u20", direction: "human", status: "open", title: "T", thread: [] };
+  assert.match(Views.deriveCompactView({ ...base, state: "backlog" }).cancelBtn, /cancel-sent/);
+  for (const state of ["in_progress", "questions", "approbation", "landing", "closed"]) {
+    assert.equal(Views.deriveCompactView({ ...base, id: `u20-${state}`, state }).cancelBtn, "", state);
+  }
+});
+
 test("deriveCompactView: a closed card with a human tail is an ordinary closed card and keeps Testé ✓ Archiver; awaiting states keep no action at all", () => {
   // A closed card is never awaitingAgent (the agent's reaction to the approval
   // WAS the close) — but the human's archive action must survive regardless.
