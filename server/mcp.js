@@ -143,18 +143,19 @@ function missingTextRefs(text) {
 // Stateless HTTP has no tools/list_changed channel, so the version rides every
 // await_replies trailer instead — a session that connected under an older
 // version learns from the delivery text that its cached tool list is stale.
-const TOOLS_VERSION = "v10"; // v10: updates fold under "notes de suivi"; question/done text is only what he must read
+const TOOLS_VERSION = "v11"; // v11: player-filed reports wait for authenticated PL intake approval
 
 function buildServer() {
   // The workflow travels with the MCP handshake so every client learns it without
   // needing the repo's WORKFLOW.md (kept in sync with that file, condensed).
   const WORKFLOW_INSTRUCTIONS = [
-    `Review-board workflow (tools ${TOOLS_VERSION}). States: backlog -> in_progress -> questions -> approbation -> landing -> closed.`,
+    `Review-board workflow (tools ${TOOLS_VERSION}). States: report_review (player-filed intake) -> backlog -> in_progress -> questions -> approbation -> landing -> closed.`,
     "Loop: await_replies (at-least-once: acknowledge_messages after reading, or items redeliver; ack = READ, never fixed).",
-    "Pick work: the human's feedback backlog cards outrank projet tasks. File your own tasks with create_task.",
+    "Pick work: the human's feedback backlog cards outrank projet tasks. Player-filed F7 cards start in report_review and require authenticated PL intake approval before any work or triage. Agent/player replies and no_review cannot grant it. File your own tasks with create_task.",
     "Dependencies: set_blockers / blocked_by on create_task/move_task (blocked until blockers reach landing/closed; you get a \"débloquée\" delivery). Priority: set_priority / priority 0-3 (0 = critical, 1 = highest, then in order).",
     "Tags (create_task/move_task tags, listed by list_messages as tags: a,b) say who CAN take a card: windows / mac / linux, unity (needs a Unity pass), or a machine name. Never start a card whose tags exclude your machine; no tag = anyone.",
-    "Start a card: move_task in_progress with agent {vendor, model, effort} (required the first time: it draws who works the card; reply_to_message also takes agent when a card changes hands). Blocked on the human: reply_to_message kind question (auto-moves to questions). Progress notes: kind update (silent, folded away under a closed \"notes de suivi\" line; free-form). The text of a question or done is the bright box he must read: plain, friendly language, no jargon, and every piece of it needed for him to understand, nothing else (no tag prefixes like [3C-host] or (plloyer-desktop); a machine name, id or technical term only when he needs it), readable on its own without the updates.",
+    "Start a card: move_task in_progress with agent {vendor, model, effort} (required the first time: it draws who works the card; reply_to_message also takes agent when a card changes hands). Blocked on the human: reply_to_message kind question (auto-moves to questions). Progress notes: kind update (silent, folded away under a closed \"notes de suivi\" line; free-form). The text of a question or done is the bright box he must read: plain, friendly language, no jargon, and every piece of it needed for him to understand, nothing else (no tag prefixes like [3C-host] or (plloyer-desktop); provenance goes in one final line \"Posted by: <machine>\" that the poster tool adds, not in a prefix; a machine name, id or technical term only when he needs it), readable on its own without the updates.",
+    "How to write to PL (question or done): everyday French; no file names, paths, ids, shas, code, abbreviations (TMP, 4K) or English workshop words (critic, build, worktree) unless he needs them, and a card he needs is described first with its id in parentheses (\"le lobby multijoueur (u781)\"). Say what he will see in the game: which screen, where, what differs. One question: OUI / NON or one line per option, then your recommendation. Attach every image you mention, each labelled with what it shows. Bad (u812): \"le critique n'accepte notre capture en 4K réduite de moitié que si elle vient d'un jeu compilé. A) on l'assouplit ; B) on attend un build\", plus a second question and an unlabelled image. Good: \"Cette carte touche la fenêtre « Prisoners in our dungeon » : la liste des nobles ennemis que ton royaume garde en prison. Sur l'image, à gauche le jeu original, à droite notre version. Le texte est maintenant pareil ; ce qui reste différent, c'est le cadre autour des portraits. On accepte cette carte et on ouvre une carte à part pour le cadre ? OUI ou NON. Je recommande OUI.\"",
     "Done with real proof: reply_to_message kind done (auto-moves to approbation). Every proof image is labelled: ![Before](/api/image?path=<enc> \"one sentence on what it shows\") - alt = short tag (Before / After / Original), quoted title = what the image shows; both appear over the zoomed image.",
     "Entering landing/closed requires the human's approval unless the task was created no_review (create_task no_review: true); closing a card already in landing is free.",
     "Proof files must be readable by the BOARD's machine. Running elsewhere? First POST the bytes: /api/upload {dataUrl, filename} -> {path}, then reference THAT path. A path from your own disk renders as a broken image on his board.",
@@ -331,7 +332,7 @@ function buildServer() {
           .enum(["update", "question", "done"])
           .default("update")
           .describe(
-            "kind: 'update' (default) for routine progress notes — silent, no notification, folded away as a log he rarely opens, free-form; 'question' when you need the human's input to continue — pings them and moves the card to questions; 'done' when the work on this issue is complete and awaits their validation — pings them and moves the card to approbation. A question or done is the bright box the human must read: plain, friendly language, no jargon, and every piece of it needed for him to understand, nothing else (no tag prefixes like [3C-host] or (plloyer-desktop); a machine name, id or technical term only when he needs it), readable on its own."
+            "kind: 'update' (default) for routine progress notes — silent, no notification, folded away as a log he rarely opens, free-form; 'question' when you need the human's input to continue — pings them and moves the card to questions; 'done' when the work on this issue is complete and awaits their validation — pings them and moves the card to approbation. A question or done is the bright box the human must read: plain, friendly language, no jargon, and every piece of it needed for him to understand, nothing else (no tag prefixes like [3C-host] or (plloyer-desktop); provenance goes in one final line \"Posted by: <machine>\" that the poster tool adds, not in a prefix; a machine name, id or technical term only when he needs it), readable on its own. Write it in everyday French: what he will see in the game, one OUI / NON or A / B question with your recommendation, every image labelled (server instructions: How to write to PL)."
           ),
         retro: z
           .string()
@@ -403,7 +404,7 @@ function buildServer() {
     "create_task",
     {
       description:
-        "Add a card to the human's backlog (state backlog). Defaults to taskKind projet; use feedback for a player's bug report, with context and optional save download link. His feedback cards always outrank project tasks — work feedback first.",
+        "Add a card to the human's backlog. Defaults to taskKind projet; use feedback for a player's bug report, with context and optional save download link. An 'F7 : ' title (legacy '(player-filed) ') starts in report_review until PL approves it on the board; other feedback cards start in backlog and outrank project tasks.",
       inputSchema: {
         title: z.string(),
         taskKind: z.enum(["projet", "feedback"]).optional().describe("Defaults to projet. feedback files a real feedback/retours card."),

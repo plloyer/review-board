@@ -13,6 +13,8 @@ const {
   agentApprovalRequiredText,
   retroRequiredText,
   APPROVAL_TEXT_RE,
+  isPlayerReport,
+  playerReportApproved,
 } = require("../shared/lifecycle");
 const { agentRequiredText } = require("../shared/agents");
 
@@ -81,6 +83,12 @@ const servableDownload = (p) => servablePath(p, [UPLOADS_DIR], DOWNLOAD_EXTENSIO
 // out of task-land entirely (no state). Mutates in place; the caller saves on next write.
 function migrateStates(s) {
   for (const m of s.messages) {
+    if (!m.replyTo && isPlayerReport(m) && !playerReportApproved(m) && m.state !== "closed") {
+      m.reportApproval = { status: "pending" };
+      m.state = "report_review";
+      delete m.noReview;
+      delete m.priority;
+    }
     if (m.state) continue;
     if (m.direction === "human") {
       if (m.replyTo) continue;
@@ -300,6 +308,10 @@ function addHumanMessage(text, images, replyTo) {
   if (!replyTo) {
     msg.taskKind = "feedback";
     msg.state = "backlog";
+    if (isPlayerReport(msg)) {
+      msg.state = "report_review";
+      msg.reportApproval = { status: "pending" };
+    }
   }
   state.messages.push(msg);
   save(state);
@@ -415,6 +427,12 @@ function createTask({ title, context, project, blockedBy, priority, noReview, ta
   // Opt-out, at creation: some tasks legitimately never need his review before
   // landing/closing (see agentMoveNeedsApproval) — still an ordinary visible card.
   if (noReview) msg.noReview = true;
+  if (isPlayerReport(msg)) {
+    msg.state = "report_review";
+    msg.reportApproval = { status: "pending" };
+    delete msg.noReview;
+    delete msg.priority;
+  }
   state.messages.push(msg);
   save(state, { author: "agent", kind: "created" });
   emitChange();
@@ -456,6 +474,8 @@ function moveTask(id, newState, note, opts = {}) {
   if (!TASK_STATES.includes(newState)) throw new Error(`Unknown state ${newState}`);
   const msg = state.messages.find((m) => m.id === id);
   if (!msg) throw new Error(`No message ${id}`);
+  if (!playerReportApproved(msg)) throw new Error(`${id} needs PL's report approval before moving`);
+  if (newState === "report_review") throw new Error("Report intake is entered only when a report is filed");
   validatePriority(priority);
 
   // The bypass this gate exists to close: an agent moving straight to landing/
@@ -593,7 +613,7 @@ function peekDeliverable() {
   // real delivery supersedes it (acknowledging the card's own id prunes the
   // notice too, same as always).
   const notices = state.pendingUnblockNotices
-    .filter((n) => !deliverableIds.has(n.id))
+    .filter((n) => !deliverableIds.has(n.id) && reportReleased(state.messages.find((m) => m.id === n.id)))
     .map((n) => ({ id: n.id, unblockNotice: true }));
   if (deliverable.length > 0) {
     const lastDeliveredAt = new Date().toISOString();
@@ -605,6 +625,8 @@ function peekDeliverable() {
 }
 
 function isDeliverable(m) {
+  // A thread reply is never a report itself: its parent's approval decides.
+  if (m.replyTo ? !reportReleased(threadParent(m), true) : !playerReportApproved(m)) return false;
   return (
     (m.direction === "agent" && m.status === "answered" && !m.acknowledgedAt) ||
     (m.direction === "human" && m.status === "open" && !m.acknowledgedAt)
@@ -615,19 +637,54 @@ function history() {
   return state.history;
 }
 
+// The card a thread-reply delivery vehicle belongs to, live or archived; a reply
+// to a reply resolves to the card at the root of the thread.
+function threadParent(m) {
+  const seen = new Set();
+  let card = m;
+  while (card && card.replyTo && !seen.has(card.id)) {
+    seen.add(card.id);
+    card = state.messages.find((c) => c.id === card.replyTo) || state.history.find((c) => c.id === card.replyTo);
+  }
+  return card === m ? null : card;
+}
+
+// A player report and everything delivered on its behalf (thread follow-ups,
+// unblock notices) stay with PL until his intake approval; a refusal never
+// releases them. `whenGone` answers for a card no longer on the board or in
+// history: a notice for it is moot, an orphaned ordinary reply still delivers
+// (withdraw() retires the whole thread of an unapproved report with it).
+function reportReleased(card, whenGone = false) {
+  return card ? playerReportApproved(card) : whenGone;
+}
+
 function withdraw(ids, actor = "agent") {
-  const idSet = new Set(ids);
+  const idSet = new Set(ids.filter((id) => {
+    const card = state.messages.find((message) => message.id === id);
+    return !card || !isPlayerReport(card) || card.state === "closed" || playerReportApproved(card);
+  }));
   // A withdrawn id can itself be someone's blocker (freeing dependents) and/or
   // carry its own pending unblock notice (now moot — it's leaving the board).
   const dependents = state.messages.filter((m) => !idSet.has(m.id) && (m.blockedBy || []).some((b) => idSet.has(b)));
   const wasBlocked = new Map(dependents.map((d) => [d.id, isBlocked(d, state.messages)]));
-  const before = state.messages.length;
-  state.messages = state.messages.filter((m) => !idSet.has(m.id));
+  const withdrawn = state.messages.filter((m) => idSet.has(m.id)).length;
+  // A withdrawn unreleased report takes its whole thread along, replies to
+  // replies included: without their root they would otherwise be delivered as
+  // ordinary thread replies. A withdrawn vehicle inside a still-unreleased
+  // thread retires to history instead, so the replies below it still resolve
+  // to the report and keep waiting for PL's decision.
+  const unreleased = new Set(state.messages.filter((m) => idSet.has(m.id) && !m.replyTo && !playerReportApproved(m)).map((m) => m.id));
+  const orphans = state.messages.filter((m) => !idSet.has(m.id) && m.replyTo && unreleased.has(threadParent(m)?.id));
+  const heldVehicles = state.messages.filter((m) => idSet.has(m.id) && m.replyTo && !unreleased.has(threadParent(m)?.id) && !reportReleased(threadParent(m), true));
+  const retired = new Set([...orphans, ...heldVehicles].map((m) => m.id));
+  const now = new Date().toISOString();
+  state.history.push(...[...orphans, ...heldVehicles].map((m) => ({ ...m, archivedAt: now })));
+  state.messages = state.messages.filter((m) => !idSet.has(m.id) && !retired.has(m.id));
   state.pendingUnblockNotices = state.pendingUnblockNotices.filter((n) => !idSet.has(n.id));
   queueUnblockNotices(dependents, wasBlocked);
   save(state, { author: actor, kind: "removed" });
   emitChange();
-  return before - state.messages.length;
+  return withdrawn;
 }
 
 // The agent confirms receipt of a deliverable item. An AGENT reply only retires to
@@ -700,7 +757,7 @@ function agentReply(id, text, kind = "update", opts = {}) {
   // Never backward out of closed/landing, same as stateAfterReply's guard — a
   // card that already shipped or is on its way stays put; the reply itself is
   // still recorded above.
-  if (next && msg.state !== "closed" && msg.state !== "landing") msg.state = next;
+  if (next && playerReportApproved(msg) && msg.state !== "closed" && msg.state !== "landing") msg.state = next;
   // Retro capture at delivery time: only a "done" delivery carries the worker's
   // retrospective (the whole point is it's written by whoever just finished the
   // work, while they're still around to write it) — a "question"/"update" retro
@@ -735,8 +792,53 @@ function humanThreadNote(id, text) {
   msg.thread = [...(msg.thread || []), { from: "human", text, at: new Date().toISOString() }];
   // His answer IS what a questions-state card was waiting for — it goes back to
   // work automatically instead of squatting the Questions column answered.
-  if (msg.state === "questions") msg.state = "in_progress";
+  if (msg.state === "questions" && playerReportApproved(msg)) msg.state = "in_progress";
   save(state, { author: "human" });
+  emitChange();
+  return msg;
+}
+
+
+// Intake consent is separate from the existing approval of completed work.
+// Identity is resolved by the authenticated web route, never from request JSON.
+function decidePlayerReport(id, { decision, priority, reason }, identity) {
+  if (!identity || identity.id !== "PL" || identity.role !== "owner") {
+    throw new Error("Only authenticated PL can decide a player-filed report");
+  }
+  const msg = state.messages.find((message) => message.id === id);
+  if (!msg || !isPlayerReport(msg)) throw new Error("Not a player-filed report");
+  if (msg.state !== "report_review" || (msg.reportApproval || {}).status !== "pending") {
+    throw new Error("This report already has an intake decision");
+  }
+  if (!["approved", "refused"].includes(decision)) throw new Error("Invalid report decision");
+  if (decision === "approved" && (!Number.isInteger(priority) || priority < 0 || priority > 3)) {
+    throw new Error("Report approval requires priority 0-3");
+  }
+  if (decision === "refused" && (typeof reason !== "string" || !reason.trim())) {
+    throw new Error("Report refusal requires a reason");
+  }
+  const dependents = state.messages.filter((message) => (message.blockedBy || []).includes(id));
+  const wasBlocked = new Map(dependents.map((message) => [message.id, isBlocked(message, state.messages)]));
+  const at = new Date().toISOString();
+  msg.reportApproval = { status: decision, by: identity.id, at };
+  const text = decision === "approved" ? "Rapport approuvé par PL." : `Rapport refusé par PL : ${reason.trim()}`;
+  msg.thread = [...(msg.thread || []), { from: "human", by: identity.id, kind: "report_decision", text, at }];
+  if (decision === "approved") {
+    msg.priority = priority;
+    msg.reportApproval.priority = priority;
+    msg.state = "backlog";
+    delete msg.readAt;
+    delete msg.acknowledgedAt;
+    delete msg.lastDeliveredAt;
+    delete msg.agent;
+  } else {
+    msg.reportApproval.reason = reason.trim();
+    msg.state = "closed";
+    msg.readAt = at;
+    msg.acknowledgedAt = at;
+    queueUnblockNotices(dependents, wasBlocked);
+  }
+  save(state, { author: "human", kind: decision === "approved" ? "approval" : "report_refused" });
   emitChange();
   return msg;
 }
@@ -756,6 +858,7 @@ function humanThreadNote(id, text) {
 function reopen(id, note) {
   const msg = state.messages.find((m) => m.id === id);
   if (!msg) throw new Error(`No message ${id}`);
+  if (isPlayerReport(msg) && !playerReportApproved(msg)) throw new Error("Refused reports require a new player report");
   if (msg.state !== "closed" && msg.state !== "landing") {
     throw new Error(`${id} can't be reopened from state "${msg.state}" — only a closed or landing card can be reopened`);
   }
@@ -789,6 +892,10 @@ function markThreadSeen(id) {
 // Human archives any live card off the board, regardless of direction or read state —
 // it's the human's own board-cleanup action.
 function archive(id) {
+  const card = state.messages.find((message) => message.id === id);
+  if (card && isPlayerReport(card) && card.state !== "closed" && !playerReportApproved(card)) {
+    throw new Error("PL must decide this report before it can be archived");
+  }
   const msg = state.messages.find((m) => m.id === id);
   if (!msg) throw new Error(`No message ${id}`);
   // Same as withdraw(): archiving an active blocker can free its dependents;
@@ -810,6 +917,7 @@ function archive(id) {
 }
 
 module.exports = {
+  decidePlayerReport,
   replayEvents,
   publishCompletion,
   DATA_DIR,

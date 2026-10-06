@@ -10,6 +10,38 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const Views = require("../public/views");
 
+test("pending F7 shows report decisions, explicit priority and refusal reason, with no generic cancellation", () => {
+  const card = { id: "u-f7-view", direction: "human", kind: "message", title: "(player-filed) Court empty",
+    state: "report_review", reportApproval: { status: "pending" }, thread: [] };
+  const compact = Views.deriveCompactView(card);
+  assert.match(compact.actionsHTML, /Approuver ce rapport/);
+  assert.match(compact.actionsHTML, /Refuser/);
+  assert.equal(compact.cancelBtn, "");
+  assert.equal(compact.priorityChip, "");
+  const overlay = Views.deriveOverlayView(card);
+  assert.equal(Views.deriveCompactView(card).priorityChip, "");
+  assert.doesNotMatch(overlay.headerHTML, /chip-prio/);
+  assert.match(overlay.footerHTML, /Priorité du rapport/);
+  assert.match(overlay.footerHTML, /Motif du refus/);
+  assert.doesNotMatch(overlay.headerHTML, /overlayArchive/);
+  assert.match(overlay.bodyHTML, /attend l’approbation de PL/);
+});
+
+test("F7 decision receipt shows identity and time, escapes refusal text and never labels refusal as tested", () => {
+  const card = { id: "u-f7-receipt", direction: "human", kind: "message", title: "(player-filed) Court empty", state: "closed",
+    reportApproval: { status: "refused", by: "PL", at: "2026-10-04T16:00:00Z", reason: "<script>unsafe</script>" }, thread: [] };
+  const overlay = Views.deriveOverlayView(card);
+  assert.match(overlay.bodyHTML, /Rapport refusé par PL/);
+  assert.match(overlay.bodyHTML, /2026-10-04T16:00:00Z/);
+  assert.match(overlay.bodyHTML, /&lt;script&gt;/);
+  assert.equal(Views.deriveCompactView(card).priorityChip, "");
+  assert.doesNotMatch(overlay.headerHTML, /chip-prio/);
+  assert.doesNotMatch(overlay.headerHTML, /overlayReopen/);
+  assert.doesNotMatch(Views.deriveCompactView(card).actionsHTML, /Testé/);
+  const updated = Views.deriveOverlayView({ ...card, reportApproval: { ...card.reportApproval, reason: "Different" } });
+  assert.notDeepEqual(updated, overlay, "receipt fields participate in the view cache identity");
+});
+
 test("formatStamp is compact: time today, 'hier' yesterday, day and short month before that", () => {
   const now = new Date(2026, 9, 2, 14, 0).getTime();
   assert.equal(Views.formatStamp(new Date(2026, 9, 2, 9, 5).toISOString(), now), "09:05");
@@ -90,6 +122,29 @@ test("feedback context is visible on compact, sent and overlay cards and its dow
     }
     const changed = { ...card, context: "Another crash" };
     assert.match(Views.deriveOverlayView(changed).bodyHTML, /Another crash/);
+  } finally {
+    global.marked = previousMarked;
+  }
+});
+
+test("an image card markdown embeds is a capped thumbnail on every surface: context, thread, retro, details (u798)", () => {
+  const shot = "![Screenshot](/api/image?path=C%3A%2Fbugs%2Fscreenshot.png)";
+  const previousMarked = global.marked;
+  global.marked = require("../public/marked.min.js");
+  try {
+    const embedded = /<img class="embedded-image" src="\/api\/image\?path=C%3A%2Fbugs%2Fscreenshot.png" alt="Screenshot">/;
+    // An F7 report: the screenshot lives in the context, nowhere else.
+    const report = { id: "u798-f7", title: "F7 : army stuck", context: `Army stuck at the ford.\n\n${shot}`, direction: "human", createdBy: "agent", taskKind: "feedback", state: "backlog", status: "open" };
+    for (const html of [Views.deriveSentView(report, true).contextHTML, Views.deriveOverlayView(report).bodyHTML]) assert.match(html, embedded);
+    const agentCard = { ...report, id: "u798-agent", direction: "agent", status: "pending", details: [shot] };
+    assert.match(Views.deriveCardView(agentCard).contextHTML, embedded);
+    assert.match(Views.deriveCardView(agentCard).details, embedded);
+    assert.match(Views.renderDetail(`## Proof\n\n${shot}`).html, embedded);
+    assert.match(Views.threadHTML({ state: "in_progress", thread: [{ from: "agent", kind: "question", text: shot }] }), embedded);
+    assert.match(Views.overlayAgentBody({ ...agentCard, retro: shot }).bodyHTML, embedded);
+    // Every <img> markdown produced carries the class; nothing slips through at full size.
+    const body = Views.deriveOverlayView({ ...report, id: "u798-all", thread: [{ from: "human", text: shot }] }).bodyHTML;
+    assert.equal((body.match(/<img\b/g) || []).length, (body.match(/<img class="embedded-image"/g) || []).length);
   } finally {
     global.marked = previousMarked;
   }

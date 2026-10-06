@@ -1,17 +1,48 @@
 # Board workflow (for the AI agent)
 
-Six states: `backlog` -> `in_progress` -> `questions` -> `approbation` -> `landing` -> `closed`.
+States: `report_review` (player-filed intake) -> `backlog` -> `in_progress` -> `questions` -> `approbation` -> `landing` -> `closed`.
+
+Player-filed F7 reports, identified by `F7 : ` titles (or the legacy `(player-filed) `
+prefix on older cards), wait in intake until PL approves on the board with a priority,
+or refuses with a reason. Only
+his signed owner session records that decision; player/agent replies and generic
+approval text cannot grant it. These reports, their thread follow-ups and their
+unblock notices are not delivered to the agent inbox until approved; a refusal never
+releases them. After intake, history triage is the first work step. Refusal closes
+without claiming a delivered fix or a work retrospective. Intake consent does not
+approve completed work, so the ordinary review/landing gates below still apply.
 
 ## The loop
 
 1. `await_replies` blocks until something is deliverable (his replies, his new feedback). Delivery is at-least-once: call `acknowledge_messages` after reading, or the same items come back every call. Acknowledge means READ, never fixed.
 2. Pick work: his `feedback` backlog cards always outrank `projet` tasks. File your own project tasks with `create_task` (they land in backlog). Pass `no_review: true` for a task that legitimately never needs his review before landing.
 3. Starting a card: `move_task(id, "in_progress", agent: {vendor, model, effort})`. `vendor` is `claude`, `codex` or `antigravity`; the board draws that icon on the card with the model and effort (optional) in its tooltip. Required the first time a card enters `in_progress`; `reply_to_message` also takes `agent` when a card changes hands. A card sent back to `backlog` loses its agent.
-4. Blocked on him: `reply_to_message(id, kind "question")` — moves the card to `questions` automatically. Routine progress notes use kind `update` (silent, no ping, folded away under "notes de suivi"; free-form). The text of a `question` or `done` is the bright box he must read: plain, friendly language, no jargon, and every piece of it needed for him to understand, nothing else (no tag prefixes like `[3C-host]` or `(plloyer-desktop)`; a machine name, id or technical term only when he needs it), readable on its own.
+4. Blocked on him: `reply_to_message(id, kind "question")` — moves the card to `questions` automatically. Routine progress notes use kind `update` (silent, no ping, folded away under "notes de suivi"; free-form). The text of a `question` or `done` is the bright box he must read: plain, friendly language, no jargon, and every piece of it needed for him to understand, nothing else (no tag prefixes like `[3C-host]` or `(plloyer-desktop)`; provenance goes in one final line `Posted by: <machine>` that the poster tool adds, not in a prefix; a machine name, id or technical term only when he needs it), readable on its own.
 5. Done with proof: `reply_to_message(id, kind "done")` — moves it to `approbation`. Attach proof as markdown images/videos in the text, each one labelled: `![Before](/api/image?path=<encoded local path> "one sentence on what it shows")`. The alt is a short tag (`Before`, `After`, `Original`, `Target`), the quoted title says what the image shows; both are displayed over the zoomed image so he knows what he is looking at. `send_message` images take the same pair as `label` and `caption`. Real screenshots, never claims. Proof files must be readable by the board machine - from another machine, POST /api/upload {dataUrl, filename} first and use the returned path.
 6. He approves (his card replies/notes say so) -> merge, then `move_task(id, "landing")`.
 7. The fix is in the build he actually runs -> `close_issue(id, note)`. Never before. He retests closed cards in his build and archives them himself.
 8. He refuses / asks changes -> his reply moves it back to `in_progress`; iterate from step 4.
+
+## How to write to PL
+
+A `question` or `done` is the one box he reads, alone, without the notes before it.
+
+- Everyday French. No file names, paths, ids, shas, code, abbreviations (TMP, SDF, 4K) or English
+  workshop words (critic, build, worktree, baseline) unless he needs them. A card he needs is
+  described first, its id in parentheses: "le lobby multijoueur (u781)".
+- Say what he will see in the game: which screen, where on it, what differs.
+- One question: OUI / NON, or one line per option (`A : <what happens>`), then your recommendation.
+- Attach every image you mention, each labelled with what it shows.
+
+Bad (u812, his answer: "je sais pas de quoi tu parles"): « le critique visuel n'accepte notre
+capture en 4K réduite de moitié que si elle vient d'un jeu compilé. A) on l'assouplit ; B) on
+attend un build », plus a second question and one unlabelled image that did not load.
+
+Good: « Cette carte touche la fenêtre « Prisoners in our dungeon » : la liste des nobles ennemis
+que ton royaume garde en prison. Sur l'image, à gauche le jeu original, à droite notre version.
+Le texte est maintenant pareil à l'original. Ce qui reste différent, c'est le cadre autour des
+portraits. On accepte cette carte et on ouvre une carte à part pour le cadre ? OUI ou NON. Je
+recommande OUI. »
 
 ## Who moves what
 

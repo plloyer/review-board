@@ -7,6 +7,75 @@ async function fetchJSON(url, opts) {
   return res.json();
 }
 
+let pendingOwnerAction = null;
+const ownerDialog = document.getElementById("ownerDialog");
+async function updateOwnerSession() {
+  const session = await fetchJSON("/api/owner/session");
+  document.getElementById("ownerSessionToggle").textContent = session.identity === "PL" ? "PL · Déconnexion" : "Connexion PL";
+  return session;
+}
+
+function requestOwnerSession(action) {
+  pendingOwnerAction = action || null;
+  document.getElementById("ownerSecret").value = "";
+  ownerDialog.showModal();
+  document.getElementById("ownerSecret").focus();
+}
+
+function cancelOwnerSession() {
+  document.getElementById("ownerSecret").value = "";
+  pendingOwnerAction = null;
+  ownerDialog.close();
+}
+document.getElementById("ownerLoginCancel").addEventListener("click", cancelOwnerSession);
+ownerDialog.addEventListener("cancel", cancelOwnerSession);
+document.getElementById("ownerLoginForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const input = document.getElementById("ownerSecret");
+  const secret = input.value;
+  input.value = "";
+  try {
+    await fetchJSON("/api/owner/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ secret }) });
+    ownerDialog.close();
+    await updateOwnerSession();
+    const action = pendingOwnerAction;
+    pendingOwnerAction = null;
+    if (action) await action();
+  } catch { showToast("Connexion PL refusée. Vérifie le secret de connexion."); }
+});
+document.getElementById("ownerSessionToggle").addEventListener("click", async () => {
+  const session = await updateOwnerSession();
+  if (session.identity === "PL") {
+    await fetchJSON("/api/owner/session", { method: "DELETE" });
+    await updateOwnerSession();
+  } else if (session.enabled) requestOwnerSession();
+  else showToast("La connexion PL doit être configurée sur le board.");
+});
+updateOwnerSession().catch(() => {});
+
+async function decideReport(msg, decision, panel) {
+  const reason = panel.querySelector(".report-reason").value.trim();
+  if (decision === "refused" && !reason) {
+    showToast("Indique le motif du refus.");
+    panel.querySelector(".report-reason").focus();
+    return;
+  }
+  const submit = async () => {
+    await fetchJSON(`/api/messages/${msg.id}/report-decision`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision, priority: Number(panel.querySelector(".report-priority").value), reason }),
+    });
+    closeOverlayIfOpen(msg.id);
+    await refresh(true);
+  };
+  try {
+    const session = await updateOwnerSession();
+    if (session.identity === "PL") await submit();
+    else if (session.enabled) requestOwnerSession(submit);
+    else showToast("La connexion PL doit être configurée sur le board.");
+  } catch { showToast("La décision n’a pas été enregistrée. Recharge le rapport et réessaie."); }
+}
+
 // msg.id -> array of server-side file paths queued to go out with that reply.
 const pendingImages = new Map();
 
@@ -187,7 +256,8 @@ function card(msg) {
   wireDropToAttach(el, msg.status === "answered" ? followupKey : msg.id);
   el.querySelectorAll(".pending-row").forEach((row) => renderPendingChips(row, row.dataset.pendingKey));
 
-  el.querySelectorAll(".thumb").forEach((img) =>
+  routeEmbeddedImages(el);
+  el.querySelectorAll(CARD_IMAGE).forEach((img) =>
     img.addEventListener("click", () => openLightbox(img.src, msg.id, msg.status !== "answered", galleryOf(el)))
   );
   el.querySelectorAll(".growable-text").forEach((ta) => ta.addEventListener("input", () => autoGrow(ta)));
@@ -390,12 +460,25 @@ async function uploadDataUrl(dataUrl, filename) {
   return path;
 }
 
+// An image card markdown embeds (views.js embedImages) opens the lightbox like the card's own
+// thumbs, except inside the thread, where an annotation rides on a comment instead.
+const CARD_IMAGE = ".thumb, .embedded-image:not(.thread .embedded-image)";
+
+// Agents embed proof images in markdown, sometimes as a bare local path: route those through
+// /api/image.
+function routeEmbeddedImages(root) {
+  root.querySelectorAll(".embedded-image").forEach((img) => {
+    const src = img.getAttribute("src") || "";
+    if (!/^(https?:|data:|\/api\/image)/i.test(src)) img.src = imgSrc(src);
+  });
+}
+
 // ponytail: single freehand red pen, no color/shape picker, no undo — add if it's
 // ever not enough for pointing at the thing in the screenshot.
 // Every image a card or overlay shows, in document order: the set the lightbox
 // arrows cycle through when one of them is opened.
 function galleryOf(root) {
-  return [...root.querySelectorAll(".thumb, .thread img")].map((i) => ({ src: i.src, label: i.alt, caption: i.title }));
+  return [...root.querySelectorAll(".thumb, .embedded-image")].map((i) => ({ src: i.src, label: i.alt, caption: i.title }));
 }
 
 function openLightbox(src, msgId, annotatable, gallery = []) {
@@ -450,6 +533,7 @@ function openLightbox(src, msgId, annotatable, gallery = []) {
   };
   function closeLightbox() {
     windowListeners.forEach(([type, handler]) => window.removeEventListener(type, handler));
+    window.removeEventListener("keydown", closeOnEscape, true);
     overlay.remove();
   }
 
@@ -457,6 +541,15 @@ function openLightbox(src, msgId, annotatable, gallery = []) {
     if (e.target === overlay) closeLightbox();
   };
   overlay.addEventListener("click", closeOnBackdrop);
+
+  // Esc closes the lightbox wherever it was opened from. Captured on window so a card overlay
+  // underneath (onOverlayKeydown, on document) stays open: a second Esc closes that.
+  function closeOnEscape(e) {
+    if (e.key !== "Escape") return;
+    e.stopPropagation();
+    closeLightbox();
+  }
+  window.addEventListener("keydown", closeOnEscape, true);
 
   // Pan/zoom: the image starts scaled to fit the screen (CSS max-width/height in
   // style.css), and scale/tx/ty are an additional transform on top of that — wheel
@@ -742,11 +835,8 @@ function sentCard(msg, delivered) {
       wirePasteToAttach(el.querySelector(".comment-text"), commentKey);
       el.querySelectorAll(".growable-text").forEach((ta) => ta.addEventListener("input", () => autoGrow(ta)));
       renderPendingChips(el.querySelector(".pending-row"), commentKey);
-      // Agents embed proof images in thread markdown, sometimes as a bare local
-      // path — route those through /api/image, and open all of them in the lightbox.
-      el.querySelectorAll(".thread img").forEach((img) => {
-        const src = img.getAttribute("src") || "";
-        if (!/^(https?:|data:|\/api\/image)/i.test(src)) img.src = imgSrc(src);
+      routeEmbeddedImages(el);
+      el.querySelectorAll(".thread .embedded-image").forEach((img) => {
         img.addEventListener("click", (e) => {
           e.stopPropagation();
           openLightbox(img.src, commentKey, true, galleryOf(el));
@@ -779,7 +869,7 @@ function sentCard(msg, delivered) {
   // Delegated on the persistent `el` (repainted via innerHTML, not recreated) so
   // this is wired exactly once regardless of how many times paint() re-renders.
   el.addEventListener("click", (e) => {
-    const thumb = e.target.closest(".thumb");
+    const thumb = e.target.closest(CARD_IMAGE);
     if (thumb) {
       // Annotations drawn here ride along with the card's next comment.
       openLightbox(thumb.src, commentKey, true, galleryOf(el));
@@ -903,6 +993,11 @@ function compactCard(msg, blockedInfo) {
   `;
 
   wireBlockedBadges(el);
+  if (msg.state === "report_review") {
+    el.querySelectorAll(".approve-report-btn, .refuse-report-btn").forEach((button) => {
+      button.addEventListener("click", (event) => { event.stopPropagation(); openOverlay(msg, el, blockedInfo); });
+    });
+  }
 
   // A Répondu card renders actionsHTML: "" except when msg.state is "closed"
   // (wired unconditionally below, since that's the one action it keeps) —
@@ -1090,7 +1185,8 @@ let openCardId = null;
 // now signs with JSON.stringify(deriveOverlayView(m)))
 
 function wireOverlayMedia(panel, msg) {
-  panel.querySelectorAll(".thumb").forEach((img) =>
+  routeEmbeddedImages(panel);
+  panel.querySelectorAll(CARD_IMAGE).forEach((img) =>
     img.addEventListener("click", () =>
       openLightbox(
         img.src,
@@ -1100,9 +1196,7 @@ function wireOverlayMedia(panel, msg) {
       )
     )
   );
-  panel.querySelectorAll(".thread img").forEach((img) => {
-    const src = img.getAttribute("src") || "";
-    if (!/^(https?:|data:|\/api\/image)/i.test(src)) img.src = imgSrc(src);
+  panel.querySelectorAll(".thread .embedded-image").forEach((img) => {
     img.addEventListener("click", (e) => {
       e.stopPropagation();
       openLightbox(img.src, `comment:${msg.id}`, true, galleryOf(panel));
@@ -1116,6 +1210,11 @@ function wireOverlayMedia(panel, msg) {
 }
 
 function wireOverlayFooter(panel, msg) {
+  if (msg.state === "report_review" && window.Lifecycle.isPlayerReport(msg)) {
+    panel.querySelector(".approve-report-btn").addEventListener("click", () => decideReport(msg, "approved", panel));
+    panel.querySelector(".refuse-report-btn").addEventListener("click", () => decideReport(msg, "refused", panel));
+    return;
+  }
   if (msg.direction === "agent") {
     if (msg.status === "answered" && !agentAwaitingDecision(msg)) {
       const followupKey = `followup:${msg.id}`;
@@ -1197,6 +1296,8 @@ function renderOverlayBody(msg, blockedBy = []) {
   const prevScroll = panel.querySelector(".overlay-scroll");
   const scrollBefore = prevScroll ? prevScroll.scrollTop : 0;
   const prevTa = panel.querySelector("textarea");
+  const prevPriority = panel.querySelector(".report-priority");
+  const sameCard = panel.dataset.msgId === String(msg.id);
   // Keyed to the message the draft belonged to — the panel is a single reused
   // DOM node, so an unkeyed harvest here would leak card A's draft into card
   // B's overlay the moment B opens with A's textarea still sitting in the DOM.
@@ -1215,9 +1316,12 @@ function renderOverlayBody(msg, blockedBy = []) {
   const scrollEl = panel.querySelector(".overlay-scroll");
   if (scrollEl) scrollEl.scrollTop = scrollBefore;
   const ta = panel.querySelector("textarea");
+  const priority = panel.querySelector(".report-priority");
+  if (priority && prevPriority && sameCard) priority.value = prevPriority.value;
   // Same-card typing wins; otherwise fall back to a draft stranded by a column
   // move into a composer-less card shape (see reconcileSection/pendingDrafts).
-  const draft = sameCardDraft || pendingDrafts.get(String(msg.id)) || "";
+  const sameComposer = prevTa && ta && prevTa.classList.contains("report-reason") === ta.classList.contains("report-reason");
+  const draft = (sameComposer ? sameCardDraft : "") || pendingDrafts.get(String(msg.id)) || "";
   if (ta && draft) {
     ta.value = draft;
     autoGrow(ta);
@@ -1263,13 +1367,7 @@ function renderOverlayBody(msg, blockedBy = []) {
 
 function onOverlayKeydown(e) {
   if (e.key !== "Escape") return;
-  // A lightbox opened from inside the overlay stacks on top of it — Esc closes
-  // just the lightbox first; a second Esc then closes the overlay itself.
-  const lightbox = document.querySelector(".lightbox");
-  if (lightbox) {
-    lightbox.click();
-    return;
-  }
+  // A lightbox stacked on top of the overlay takes the first Esc itself (openLightbox).
   closeOverlay();
 }
 
