@@ -23,6 +23,27 @@ approve completed work, so the ordinary review/landing gates below still apply.
 7. The fix is in the build he actually runs -> `close_issue(id, note)`. Never before. He retests closed cards in his build and archives them himself.
 8. He refuses / asks changes -> his reply moves it back to `in_progress`; iterate from step 4.
 
+## How to write to PL
+
+A `question` or `done` is the one box he reads, alone, without the notes before it.
+
+- Everyday French. No file names, paths, ids, shas, code, abbreviations (TMP, SDF, 4K) or English
+  workshop words (critic, build, worktree, baseline) unless he needs them. A card he needs is
+  described first, its id in parentheses: "le lobby multijoueur (u781)".
+- Say what he will see in the game: which screen, where on it, what differs.
+- One question: OUI / NON, or one line per option (`A : <what happens>`), then your recommendation.
+- Attach every image you mention, each labelled with what it shows.
+
+Bad (u812, his answer: "je sais pas de quoi tu parles"): « le critique visuel n'accepte notre
+capture en 4K réduite de moitié que si elle vient d'un jeu compilé. A) on l'assouplit ; B) on
+attend un build », plus a second question and one unlabelled image that did not load.
+
+Good: « Cette carte touche la fenêtre « Prisoners in our dungeon » : la liste des nobles ennemis
+que ton royaume garde en prison. Sur l'image, à gauche le jeu original, à droite notre version.
+Le texte est maintenant pareil à l'original. Ce qui reste différent, c'est le cadre autour des
+portraits. On accepte cette carte et on ouvre une carte à part pour le cadre ? OUI ou NON. Je
+recommande OUI. »
+
 ## Who moves what
 
 You move cards (`move_task`, or automatically via `reply_to_message`/`close_issue`). He answers, approves, archives — he never drags cards.
