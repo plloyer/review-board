@@ -682,3 +682,9 @@ test("overlay header shows the card id", () => {
   const view = Views.deriveOverlayView({ id: "u119", direction: "human", status: "open", state: "in_progress", title: "T" });
   assert.match(view.headerHTML, /<span class="overlay-id">u119<\/span>/);
 });
+
+test("columnCountTexts: badge is active + Répondu, empty when zero, Répondu count scoped", () => {
+  assert.deepEqual(Views.columnCountTexts(50, 0), { total: "50", answered: "" });
+  assert.deepEqual(Views.columnCountTexts(48, 2), { total: "50", answered: "2" });
+  assert.deepEqual(Views.columnCountTexts(0, 0), { total: "", answered: "" });
+});

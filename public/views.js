@@ -719,6 +719,17 @@ function deriveOverlayView(msg, { blockedBy = [], pendingCounts } = {}) {
   });
 }
 
+// Header/rail count and Répondu-divider count for one column, from the two lists
+// the column renders (active cards, Répondu cards). One source for refresh() and
+// the optimistic archive, so the badge always equals what the column shows.
+function columnCountTexts(activeCount, answeredCount) {
+  const total = activeCount + answeredCount;
+  return {
+    total: total > 0 ? String(total) : "",
+    answered: answeredCount > 0 ? String(answeredCount) : "",
+  };
+}
+
 const Views = {
   imgSrc,
   esc,
@@ -747,6 +758,7 @@ const Views = {
   deriveOverlayView,
   messageFingerprint,
   pruneViewCache,
+  columnCountTexts,
 };
 
 if (typeof module !== "undefined") module.exports = Views;

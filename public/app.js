@@ -1417,6 +1417,7 @@ function archiveOptimistic(msg, el) {
   const id = String(msg.id);
   archivingIds.add(id);
   el.style.display = "none";
+  renderColumnCounts(msg.state);
   fetchJSON(`/api/messages/${msg.id}/archive`, { method: "POST" })
     .then(() => {
       archivingIds.delete(id);
@@ -1424,12 +1425,25 @@ function archiveOptimistic(msg, el) {
     .catch((err) => {
       archivingIds.delete(id);
       el.style.display = "";
+      renderColumnCounts(msg.state);
       showToast(`Archive failed: ${err.message}`);
     })
     .finally(() => {
       clearTimeout(archiveRefreshTimer);
       archiveRefreshTimer = setTimeout(() => refresh(true), 600);
     });
+}
+
+// The column-count pill, rail count and Répondu count are derived from the cards the
+// column actually shows (not hidden by an optimistic archive), so they can never
+// disagree with the column. The pill and rail show active + Répondu.
+function renderColumnCounts(state) {
+  const shown = (id) => [...document.getElementById(id).children].filter((c) => c.style.display !== "none").length;
+  const texts = Views.columnCountTexts(shown(`cards-${state}`), shown(`cards-answered-${state}`));
+  document.getElementById(`count-${state}`).textContent = texts.total;
+  const railCount = document.getElementById(`railcount-${state}`);
+  if (railCount) railCount.textContent = texts.total;
+  document.getElementById(`answered-count-${state}`).textContent = texts.answered;
 }
 
 async function refresh(force) {
@@ -1536,18 +1550,10 @@ async function refresh(force) {
     reconcileSection(container, desired, drafts);
     container.classList.toggle("empty", desired.length === 0);
     document.getElementById(`col-${s}`).classList.toggle("empty-col", desired.length === 0 && answeredMsgs.length === 0);
-    // The column-count pill and rail count show the TOTAL (active + Répondu) —
-    // the Répondu divider's own count below stays scoped to just that list.
-    const totalCount = desired.length + answeredMsgs.length;
-    const countText = totalCount > 0 ? String(totalCount) : "";
-    document.getElementById(`count-${s}`).textContent = countText;
-    const railCount = document.getElementById(`railcount-${s}`);
-    if (railCount) railCount.textContent = countText;
-
     const answeredDesired = answeredMsgs.map(toDesired);
     reconcileSection(document.getElementById(`cards-answered-${s}`), answeredDesired, drafts);
     document.getElementById(`answered-${s}`).hidden = answeredDesired.length === 0;
-    document.getElementById(`answered-count-${s}`).textContent = answeredDesired.length > 0 ? String(answeredDesired.length) : "";
+    renderColumnCounts(s);
   }
 
   reconcileSection(document.getElementById("cardsHistory"), historyDesired, drafts);
