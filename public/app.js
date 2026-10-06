@@ -786,7 +786,7 @@ function sentCard(msg, delivered) {
       return;
     }
     if (e.target.closest(".archive-link")) {
-      fetchJSON(`/api/messages/${msg.id}/archive`, { method: "POST" }).then(() => refresh(true));
+      archiveOptimistic(msg, el);
       return;
     }
     if (e.target.closest(".cancel-sent")) {
@@ -975,9 +975,7 @@ function compactCard(msg, blockedInfo) {
   // Unconditional on awaitingAgent: a closed+Répondu card keeps the archive
   // action too (deriveCompactView's actionsHTML includes it either way).
   if (msg.state === "closed") {
-    el.querySelector(".archive-link-btn").addEventListener("click", () => {
-      fetchJSON(`/api/messages/${msg.id}/archive`, { method: "POST" }).then(() => refresh(true));
-    });
+    el.querySelector(".archive-link-btn").addEventListener("click", () => archiveOptimistic(msg, el));
   }
   // Any compact card can receive a dropped image, not just ones with a visible
   // composer — same key the overlay would attach to for this message. Also
@@ -1407,6 +1405,33 @@ function reconcileSection(containerEl, desired, drafts) {
 // latest after its awaits bails instead of reconciling with stale data.
 let refreshToken = 0;
 
+// Ids whose archive POST is in flight: the card is already gone from the UI, and
+// refresh() keeps it out of the columns until the server confirms (or the POST fails).
+const archivingIds = new Set();
+let archiveRefreshTimer = null;
+
+// Archive without waiting: hide the card now, POST in the background, and fold the
+// board refresh (two big GETs plus a re-render) into one trailing call so archiving
+// a run of cards doesn't pay it per click. A failed POST restores the card.
+function archiveOptimistic(msg, el) {
+  const id = String(msg.id);
+  archivingIds.add(id);
+  el.style.display = "none";
+  fetchJSON(`/api/messages/${msg.id}/archive`, { method: "POST" })
+    .then(() => {
+      archivingIds.delete(id);
+    })
+    .catch((err) => {
+      archivingIds.delete(id);
+      el.style.display = "";
+      showToast(`Archive failed: ${err.message}`);
+    })
+    .finally(() => {
+      clearTimeout(archiveRefreshTimer);
+      archiveRefreshTimer = setTimeout(() => refresh(true), 600);
+    });
+}
+
 async function refresh(force) {
   // Never rebuild the DOM out from under an open lightbox — a rebuild under an
   // open annotate canvas would lose the drawing reference. Keyed reconciliation
@@ -1439,7 +1464,7 @@ async function refresh(force) {
   // replyTo human message is a thread-reply delivery vehicle and has none).
   const byState = {};
   for (const s of COLUMN_STATES) byState[s] = [];
-  for (const m of live) if (byState[m.state]) byState[m.state].push(m);
+  for (const m of live) if (byState[m.state] && !archivingIds.has(String(m.id))) byState[m.state].push(m);
   for (const s of COLUMN_STATES) byState[s].reverse(); // newest first
   // Priority (0 first, absent = 2) is a stable sort on top of newest-first, in
   // every column — applied before the backlog-only taskKind sort below so that
