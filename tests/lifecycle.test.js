@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const Lifecycle = require("../shared/lifecycle");
 
 test("TASK_STATES and COLUMN_STATES are the same canonical list", () => {
-  assert.deepEqual(Lifecycle.TASK_STATES, ["report_review", "backlog", "in_progress", "questions", "approbation", "landing", "closed"]);
+  assert.deepEqual(Lifecycle.TASK_STATES, ["backlog", "in_progress", "questions", "approbation", "landing", "closed"]);
   assert.equal(Lifecycle.COLUMN_STATES, Lifecycle.TASK_STATES);
 });
 

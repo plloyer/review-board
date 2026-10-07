@@ -103,8 +103,9 @@ test("a report uploads its files, files one player card, and is found again by i
     const card = store.list().find((c) => c.id === id);
     assert.equal(card.taskKind, "feedback");
     assert.equal(card.project, "Three Crowns · player report");
-    assert.equal(card.state, "report_review", "a player card waits for PL's intake approval");
-    assert.deepEqual(card.reportApproval, { status: "pending" });
+    assert.equal(card.state, "backlog", "a player card lands on the board at once, no intake approval");
+    assert.equal(card.reportApproval, undefined);
+    assert.ok(store.peekDeliverable().some((m) => m.id === id), "the agent inbox receives it at once");
     assert.ok(!card.noReview, "a player card waits for the human's approval");
     assert.equal(card.title, "F7 : The siege never ends");
 
@@ -126,7 +127,7 @@ test("a report uploads its files, files one player card, and is found again by i
     const legacy = await (await post(base, "/mcp", createCall(`[three-crowns-report:legacy] x`, "(player-filed) Old client"))).json();
     const legacyCard = store.list().find((c) => c.id === legacy.result.content[0].text);
     assert.equal(legacyCard.title, "F7 : Old client", "an older game's legacy prefix is filed under the F7 prefix");
-    assert.equal(legacyCard.state, "report_review");
+    assert.equal(legacyCard.state, "backlog");
   });
 });
 

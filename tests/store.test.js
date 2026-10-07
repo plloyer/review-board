@@ -1067,3 +1067,25 @@ test("tags: createTask and moveTask store them normalized; a human message deriv
   const plain = store.addHumanMessage("no tags here", []);
   assert.equal(plain.tags, undefined);
 });
+
+test("F7 reports go straight to backlog; cards left in the old report_review intake migrate to backlog", () => {
+  const { store } = freshStore();
+  const filed = store.createTask({ title: "F7 : Court empty", taskKind: "feedback", priority: 1 });
+  assert.equal(filed.state, "backlog");
+  assert.equal(filed.priority, 1);
+  assert.ok(store.peekDeliverable().some((m) => m.id === filed.id));
+  assert.equal(store.addHumanMessage("(player-filed) Old title", [], null).state, "backlog");
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "review-board-test-"));
+  fs.writeFileSync(path.join(dir, "messages.json"), JSON.stringify({ nextAgentId: 1, nextHumanId: 3, history: [], messages: [
+    { id: "u1", direction: "human", status: "open", title: "F7 : Pending", state: "report_review", reportApproval: { status: "pending" } },
+    { id: "u2", direction: "human", status: "open", title: "F7 : Refused", state: "closed", reportApproval: { status: "refused", by: "PL", at: "2026-10-05", reason: "x" } },
+  ] }));
+  process.env.REVIEW_BOARD_DATA_DIR = dir;
+  delete require.cache[require.resolve("../server/store")];
+  const migrated = require("../server/store").list();
+  assert.equal(migrated.find((m) => m.id === "u1").state, "backlog");
+  assert.equal(migrated.find((m) => m.id === "u2").state, "closed");
+  for (const card of migrated) assert.equal(card.reportApproval, undefined);
+  assert.ok(require("../server/store").peekDeliverable().some((m) => m.id === "u1"));
+});

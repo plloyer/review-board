@@ -44,8 +44,7 @@ function startServer() {
   watchForNotifications(notify);
 
   // Bind to all interfaces so phone/iPad on the same LAN can reach it too.
-  // General routes assume a human caller; only F7 intake has an owner session.
-  // Keep the board on the private LAN or behind its deployment proxy.
+  // ponytail: no auth — fine on a home LAN, not something to expose past it.
   const server = web.listen(PORT, "0.0.0.0", () => {
     startupLog(`listening ${PORT}`);
     console.log(`Review board listening on http://localhost:${PORT}`);
