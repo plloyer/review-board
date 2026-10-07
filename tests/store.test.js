@@ -1087,5 +1087,6 @@ test("F7 reports go straight to backlog; cards left in the old report_review int
   assert.equal(migrated.find((m) => m.id === "u1").state, "backlog");
   assert.equal(migrated.find((m) => m.id === "u2").state, "closed");
   for (const card of migrated) assert.equal(card.reportApproval, undefined);
+  assert.equal(migrated.find((m) => m.id === "u1").title, "[F7] Pending", "an old F7 card shows the [F7] prefix");
   assert.ok(require("../server/store").peekDeliverable().some((m) => m.id === "u1"));
 });

@@ -241,3 +241,12 @@ test("extractPathRefs reads a markdown image with a quoted title and reports a m
   );
   assert.deepEqual(refs, ["C:\\x\\b.png", "C:/shots/a.png", "$/api/image?path=C%3A%5Cx%5Cb.png"]);
 });
+
+test("every F7 report title starts with [F7] (PL, 2026-10-06); legacy prefixes are rewritten once", () => {
+  assert.equal(Lifecycle.PLAYER_REPORT_TITLE_PREFIX, "[F7] ");
+  assert.equal(Lifecycle.currentPlayerReportTitle("[F7] Army stuck"), "[F7] Army stuck");
+  assert.equal(Lifecycle.currentPlayerReportTitle("F7 : Army stuck"), "[F7] Army stuck");
+  assert.equal(Lifecycle.currentPlayerReportTitle("(player-filed) Army stuck"), "[F7] Army stuck");
+  assert.equal(Lifecycle.currentPlayerReportTitle("Fix the march planner"), "Fix the march planner");
+  assert.ok(Lifecycle.hasPlayerReportTitle("[F7] x") && Lifecycle.hasPlayerReportTitle("F7 : x"));
+});

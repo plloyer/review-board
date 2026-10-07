@@ -13,7 +13,7 @@
 const crypto = require("crypto");
 const express = require("express");
 const store = require("./store");
-const { PLAYER_REPORT_TITLE_PREFIX, PLAYER_REPORT_TITLE_PREFIXES } = require("../shared/lifecycle");
+const { PLAYER_REPORT_TITLE_PREFIX, hasPlayerReportTitle, currentPlayerReportTitle } = require("../shared/lifecycle");
 const { storeUpload } = require("./web");
 
 const KEY_HEADER = "x-intake-key";
@@ -59,10 +59,9 @@ function cardsWithMarker(marker) {
     [card.context, card.text, card.title].some((field) => typeof field === "string" && field.includes(marker)));
 }
 
-// Every filed report carries the current F7 prefix; an older game's legacy prefix is replaced.
+// Every filed report carries the current "[F7] " prefix; an older game's legacy prefix is replaced.
 function reportTitle(title) {
-  const prefix = PLAYER_REPORT_TITLE_PREFIXES.find((candidate) => title.startsWith(candidate));
-  return PLAYER_REPORT_TITLE_PREFIX + (prefix ? title.slice(prefix.length) : title);
+  return hasPlayerReportTitle(title) ? currentPlayerReportTitle(title) : PLAYER_REPORT_TITLE_PREFIX + title;
 }
 
 function rpcError(res, id, code, message) {

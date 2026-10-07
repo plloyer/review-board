@@ -2,8 +2,8 @@
 
 Six states: `backlog` -> `in_progress` -> `questions` -> `approbation` -> `landing` -> `closed`.
 
-Player-filed F7 reports, identified by `F7 : ` titles (or the legacy `(player-filed) `
-prefix on older cards), land in `backlog` as ordinary feedback cards the moment the
+Player-filed F7 reports, identified by `[F7] ` titles (the board rewrites the legacy
+`F7 : ` and `(player-filed) ` prefixes to `[F7] `), land in `backlog` as ordinary feedback cards the moment the
 game files them: no intake approval (PL, 2026-10-06). The ordinary review/landing
 gates below still apply to the fix.
 

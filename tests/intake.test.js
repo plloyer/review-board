@@ -107,7 +107,7 @@ test("a report uploads its files, files one player card, and is found again by i
     assert.equal(card.reportApproval, undefined);
     assert.ok(store.peekDeliverable().some((m) => m.id === id), "the agent inbox receives it at once");
     assert.ok(!card.noReview, "a player card waits for the human's approval");
-    assert.equal(card.title, "F7 : The siege never ends");
+    assert.equal(card.title, "[F7] The siege never ends", "a game still sending \"F7 : \" gets the [F7] prefix");
 
     // A resend answers the same card instead of a duplicate.
     const again = await (await post(base, "/mcp", createCall(context))).json();
@@ -123,11 +123,13 @@ test("a report uploads its files, files one player card, and is found again by i
     const unmarked = await (await post(base, "/mcp", createCall("no marker here"))).json();
     assert.equal(unmarked.error.code, -32602);
     const untitled = await (await post(base, "/mcp", createCall(`[three-crowns-report:other] x`, "Crash"))).json();
-    assert.equal(store.list().find((c) => c.id === untitled.result.content[0].text).title, "F7 : Crash");
+    assert.equal(store.list().find((c) => c.id === untitled.result.content[0].text).title, "[F7] Crash");
     const legacy = await (await post(base, "/mcp", createCall(`[three-crowns-report:legacy] x`, "(player-filed) Old client"))).json();
     const legacyCard = store.list().find((c) => c.id === legacy.result.content[0].text);
-    assert.equal(legacyCard.title, "F7 : Old client", "an older game's legacy prefix is filed under the F7 prefix");
+    assert.equal(legacyCard.title, "[F7] Old client", "an older game's legacy prefix is filed under the [F7] prefix");
     assert.equal(legacyCard.state, "backlog");
+    const current = await (await post(base, "/mcp", createCall(`[three-crowns-report:current] x`, "[F7] New client"))).json();
+    assert.equal(store.list().find((c) => c.id === current.result.content[0].text).title, "[F7] New client", "the prefix is never doubled");
   });
 });
 

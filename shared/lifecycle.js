@@ -28,12 +28,20 @@ const STATE_LABEL = {
   closed: "closed",
 };
 
-// F7 report titles: the current prefix, then the legacy one existing cards still carry (u769).
-const PLAYER_REPORT_TITLE_PREFIX = "F7 : ";
-const PLAYER_REPORT_TITLE_PREFIXES = [PLAYER_REPORT_TITLE_PREFIX, "(player-filed) "];
+// F7 report titles: every card filed from an in-game F7 report starts with "[F7] " so PL
+// spots it (PL, 2026-10-06); "F7 : " (u769, still sent by older game builds) and
+// "(player-filed) " are legacy prefixes the board rewrites to the current one.
+const PLAYER_REPORT_TITLE_PREFIX = "[F7] ";
+const PLAYER_REPORT_TITLE_PREFIXES = [PLAYER_REPORT_TITLE_PREFIX, "F7 : ", "(player-filed) "];
 
 function hasPlayerReportTitle(title) {
   return PLAYER_REPORT_TITLE_PREFIXES.some((prefix) => String(title || "").startsWith(prefix));
+}
+
+// The title under the current F7 prefix when it carries any F7 prefix; any other title unchanged.
+function currentPlayerReportTitle(title) {
+  const prefix = PLAYER_REPORT_TITLE_PREFIXES.find((candidate) => String(title || "").startsWith(candidate));
+  return prefix ? PLAYER_REPORT_TITLE_PREFIX + title.slice(prefix.length) : title;
 }
 
 // A note is a progress update, not a question — it must never land in the
@@ -218,6 +226,7 @@ const Lifecycle = {
   PLAYER_REPORT_TITLE_PREFIX,
   PLAYER_REPORT_TITLE_PREFIXES,
   hasPlayerReportTitle,
+  currentPlayerReportTitle,
   TASK_STATES,
   COLUMN_STATES,
   STATE_LABEL,

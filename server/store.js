@@ -13,6 +13,7 @@ const {
   agentApprovalRequiredText,
   retroRequiredText,
   APPROVAL_TEXT_RE,
+  currentPlayerReportTitle,
 } = require("../shared/lifecycle");
 const { agentRequiredText } = require("../shared/agents");
 
@@ -80,6 +81,8 @@ const servableDownload = (p) => servablePath(p, [UPLOADS_DIR], DOWNLOAD_EXTENSIO
 // are thread-reply delivery vehicles, never rendered as their own card, so they're left
 // out of task-land entirely (no state). Mutates in place; the caller saves on next write.
 function migrateStates(s) {
+  // Cards filed under an older F7 prefix show the current "[F7] " one (PL, 2026-10-06).
+  for (const m of [...s.messages, ...(s.history || [])]) m.title = currentPlayerReportTitle(m.title);
   for (const m of s.messages) {
     // F7 reports once waited in a "report_review" intake column for PL's approval;
     // PL dropped that step (2026-10-06): they are ordinary backlog cards now.
