@@ -371,3 +371,13 @@ body.overlay-open { overflow: hidden; }
 
   .overlay-panel { width: 94vw; height: 90vh; }
 }
+
+/* An owner decision precedes the retained technical discussion. */
+.owner-decision { padding: 14px 0; }
+.owner-decision h3 { margin: 0 0 8px; }
+.owner-decision .question-choices { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.question-option { white-space: normal; text-align: left; }
+.owner-decision p { margin: 8px 0; }
+.question-details { margin-top: 16px; border-top: 1px solid var(--border, #3a3a3a); padding-top: 12px; }
+.question-details > summary { cursor: pointer; font-weight: 600; }
+.question-details[open] > summary { margin-bottom: 12px; }

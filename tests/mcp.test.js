@@ -91,7 +91,7 @@ test("reply_to_message kind question/done move the card; kind update does not", 
   const client = await connectedClient(mcp);
   const h1 = store.addHumanMessage("bug report", []);
 
-  await client.callTool({ name: "reply_to_message", arguments: { id: h1.id, text: "need more info", kind: "question" } });
+  await client.callTool({ name: "reply_to_message", arguments: { id: h1.id, text: "Question : Valides-tu cet affichage ?\nA : Garder cet affichage.\nB : Garder le précédent.\nRecommandation : A pour sa lisibilité.\nConséquence : Le prochain écran utilise cet affichage.", kind: "question" } });
   assert.equal(store.list().find((m) => m.id === h1.id).state, "questions");
 
   await client.callTool({ name: "reply_to_message", arguments: { id: h1.id, text: "fixed, ready for review", kind: "done" } });
@@ -592,4 +592,16 @@ test("await_replies still inlines an uploaded image byte for byte, next to an at
   assert.equal(images[0].mimeType, "image/png");
   assert.deepEqual(Buffer.from(images[0].data, "base64"), fs.readFileSync(upload));
   assert.ok(res.content.some((b) => b.text === "attached image: shot.png"));
+});
+
+test("MCP rejects progress-only Questions without changing the card", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const card = store.addHumanMessage("Investigation", []);
+  const before = JSON.stringify(store.list());
+  const response = await client.callTool({ name: "reply_to_message", arguments: { id: card.id, text: "Je compare les erreurs.", kind: "question" } });
+  assert.equal(response.isError, true);
+  assert.match(response.content[0].text, /OWNER DECISION REQUIRED/);
+  assert.equal(JSON.stringify(store.list()), before);
+  await client.close();
 });

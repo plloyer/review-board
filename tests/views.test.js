@@ -731,3 +731,27 @@ test("columnCountTexts: badge is active + Répondu, empty when zero, Répondu co
   assert.deepEqual(Views.columnCountTexts(48, 2), { total: "50", answered: "2" });
   assert.deepEqual(Views.columnCountTexts(0, 0), { total: "", answered: "" });
 });
+
+const OWNER_QUESTION = "Question : Valides-tu cet affichage ?\nA : Garder cet affichage.\nB : Garder le précédent.\nRecommandation : A pour sa lisibilité.\nConséquence : Le prochain écran utilise cet affichage.";
+
+test("Questions puts one decision and choices before all twenty retained technical replies", () => {
+  const thread = Array.from({ length: 20 }, (_, i) => ({ from: "agent", kind: "update", text: `Technical note ${i + 1}`, at: `2026-10-10T12:${String(i).padStart(2, "0")}:00Z` }));
+  thread.push({ from: "agent", kind: "question", text: OWNER_QUESTION, at: "2026-10-10T13:00:00Z" });
+  const card = { id: "owner-decision-fixture", direction: "human", state: "questions", status: "open", title: "Technical title", context: "Technical description", thread };
+  const view = Views.deriveOverlayView(card);
+  assert.match(view.headerHTML, /Valides-tu cet affichage/);
+  assert.ok(view.bodyHTML.indexOf('class="owner-decision"') < view.bodyHTML.indexOf('class="question-details"'));
+  assert.match(view.bodyHTML, /question-option/);
+  assert.match(view.bodyHTML, /Recommandation/);
+  assert.match(view.bodyHTML, /Conséquence/);
+  assert.doesNotMatch(view.bodyHTML, /<details class="question-details" open/);
+  for (let i = 1; i <= 20; i++) assert.ok(view.bodyHTML.includes(`Technical note ${i}`));
+  assert.match(view.bodyHTML, /Technical description/);
+  assert.match(Views.deriveCompactView(card).title, /Valides-tu cet affichage/);
+});
+test("malformed historical Questions displays missing decision without inventing answers", () => {
+  const view = Views.deriveOverlayView({ id: "legacy-progress", direction: "human", state: "questions", title: "Investigating", thread: [{ from: "agent", kind: "question", text: "Je compare les erreurs." }] });
+  assert.match(view.bodyHTML, /Aucune décision précise/);
+  assert.doesNotMatch(view.bodyHTML, /question-option/);
+  assert.match(view.bodyHTML, /Je compare les erreurs/);
+});

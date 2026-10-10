@@ -164,7 +164,8 @@ function createApp({ clipboard } = {}) {
     try {
       res.json(store.moveTask(req.params.id, state, note));
     } catch (err) {
-      res.status(404).json({ error: String(err.message || err) });
+      const message = String(err.message || err);
+      res.status(message.startsWith("OWNER DECISION REQUIRED:") ? 400 : 404).json({ error: message });
     }
   });
 

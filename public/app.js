@@ -89,6 +89,16 @@ async function submitThreadComment(el, textSelector, key, title, threadMsgId) {
   }
 }
 
+function wireQuestionOptions(el) {
+  el.querySelectorAll(".question-option").forEach((button) => button.addEventListener("click", () => {
+    const field = el.querySelector(".comment-text");
+    if (!field) return;
+    field.value = decodeURIComponent(button.dataset.opt);
+    autoGrow(field);
+    field.focus();
+  }));
+}
+
 // Shared by card() and the overlay's agent body: a detail line renders as a list
 // item unless it's block-level markdown (headings/lists/multiple paragraphs), in
 // which case it gets its own block instead of being crammed into a bullet.
@@ -763,6 +773,7 @@ function sentCard(msg, delivered) {
         </div>
         <div class="pending-row" data-pending-key="${commentKey}"></div>
       `;
+      wireQuestionOptions(el);
       wirePasteToAttach(el.querySelector(".comment-text"), commentKey);
       el.querySelectorAll(".growable-text").forEach((ta) => ta.addEventListener("input", () => autoGrow(ta)));
       renderPendingChips(el.querySelector(".pending-row"), commentKey);
@@ -924,6 +935,7 @@ function compactCard(msg, blockedInfo) {
   `;
 
   wireBlockedBadges(el);
+  wireQuestionOptions(el);
 
   // A Répondu card renders actionsHTML: "" except when msg.state is "closed"
   // (wired unconditionally below, since that's the one action it keeps) —
@@ -1136,6 +1148,7 @@ function wireOverlayMedia(panel, msg) {
 }
 
 function wireOverlayFooter(panel, msg) {
+  wireQuestionOptions(panel);
   if (msg.direction === "agent") {
     if (msg.status === "answered" && !agentAwaitingDecision(msg)) {
       const followupKey = `followup:${msg.id}`;
@@ -1223,13 +1236,13 @@ function renderOverlayBody(msg, blockedBy = []) {
   const sameCardDraft = prevTa && panel.dataset.msgId === String(msg.id) ? prevTa.value : "";
 
   // A fold he opened stays open when a new note re-renders the same card.
-  const openFolds = panel.dataset.msgId === String(msg.id) ? [...panel.querySelectorAll(".log-fold")].map((d) => d.open) : [];
+  const openFolds = panel.dataset.msgId === String(msg.id) ? [...panel.querySelectorAll(".log-fold, .question-details")].map((d) => d.open) : [];
 
   const view = deriveOverlayView(msg, { blockedBy, pendingCounts: pendingCountsFor(msg.id) });
   panel.innerHTML = `<div class="overlay-scroll">${view.headerHTML}${view.bodyHTML}</div><div class="overlay-footer">${view.footerHTML}</div>`;
   panel.dataset.sig = JSON.stringify(view);
   panel.dataset.msgId = String(msg.id);
-  panel.querySelectorAll(".log-fold").forEach((d, i) => (d.open = !!openFolds[i]));
+  panel.querySelectorAll(".log-fold, .question-details").forEach((d, i) => (d.open = !!openFolds[i]));
   refreshStamps();
 
   const scrollEl = panel.querySelector(".overlay-scroll");

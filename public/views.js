@@ -21,6 +21,7 @@
 (function () {
 const LocalLifecycle = typeof module !== "undefined" ? require("../shared/lifecycle") : window.Lifecycle;
 const { AGENT_VENDORS } = typeof module !== "undefined" ? require("../shared/agents") : window.Agents;
+const Questions = typeof module !== "undefined" ? require("../shared/questions") : window.Questions;
 const { lastThreadEntry, isActionableThreadEntry, unseenActionable, agentAwaitingDecision, awaitingAgent, STATE_LABEL } = LocalLifecycle;
 
 function imgSrc(p) {
@@ -193,6 +194,18 @@ function optionsHTML(options) {
   return (options || [])
     .map((opt) => `<button class="opt" data-opt="${encodeURIComponent(opt)}">${esc(opt)}</button>`)
     .join("");
+}
+
+function questionFirstBody(msg, technicalHTML, attachmentsHTML = "") {
+  if (msg.state !== "questions") return null;
+  const decision = Questions.latest(msg);
+  const content = !decision || decision.error
+    ? `<p class="question-missing">Aucune décision précise à prendre n’est indiquée. Le suivi technique reste dans les détails.</p>`
+    : `<section class="owner-decision"><h3>Question</h3><p>${esc(decision.question)}</p>
+        <div class="question-choices">${msg.direction === "agent" ? optionsHTML(decision.options) : decision.options.map((option) => `<button class="question-option" data-opt="${encodeURIComponent(option)}">${esc(option)}</button>`).join("")}</div>
+        <p><strong>Recommandation :</strong> ${esc(decision.recommendation)}</p>
+        <p><strong>Conséquence :</strong> ${esc(decision.consequence || "Non précisée dans cette ancienne question.")}</p></section>`;
+  return `${content}${attachmentsHTML}<details class="question-details"><summary>Détails · description et réponses</summary>${technicalHTML}</details>`;
 }
 
 // The one-line summary of a reply/decision shown once a card is "answered" —
@@ -493,6 +506,8 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
   const inputsKey = messageFingerprint(msg, { blockedNow: blockedBy, pendingCounts });
   return memoize(compactCache, msg, inputsKey, () => {
     const core = deriveCardCore(msg, { blockedBy });
+    const decision = msg.state === "questions" ? Questions.latest(msg) : null;
+    const questionTitle = decision && !decision.error ? esc(decision.question) : core.shortTitle;
     // feedback/projet chips dropped: the "Créée par l'IA" sub line + backlog
     // grouping already carry that; only the change-request chip stays (semantic, rare).
     const chip =
@@ -521,7 +536,7 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
         tagNote,
         runTime,
         sourceChip: core.sourceChip,
-        title: core.shortTitle,
+        title: questionTitle,
         miniThumb: core.miniThumbHTML,
         // No cancel button either — a card with a recorded reply/comment
         // already went out. "No action buttons" per the mock holds except one:
@@ -537,14 +552,14 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
       };
     }
 
-    const sub = compactSubline(msg, core.tail);
+    const sub = decision && !decision.error ? { cls: "sub-question", text: `❓ ${compactSnippet(decision.question)}` } : compactSubline(msg, core.tail);
 
     let actionsHTML = "";
     if (msg.state === "questions" && msg.direction === "agent") {
       actionsHTML = `
         <div class="ccard-actions">
           ${msg.kind === "review" ? `<button class="approve-btn">✅ Approve</button>` : ""}
-          ${optionsHTML(msg.options)}
+          ${optionsHTML(decision && !decision.error ? decision.options : msg.options)}
           <textarea class="growable-text reply-text" rows="1" placeholder="Répondre…"></textarea>
           <label class="attach-btn">📎<input type="file" accept="image/*,video/*" class="attach-input" hidden /></label>
           <button class="send-reply">Reply</button>
@@ -555,6 +570,7 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
       const approveBtn = core.canApprove ? `<button class="approve-issue-btn">✅ Approuver</button>` : "";
       actionsHTML = `
         <div class="ccard-actions">
+          ${decision && !decision.error ? `<div class="question-choices">${decision.options.map((option) => `<button class="question-option" data-opt="${encodeURIComponent(option)}">${esc(option)}</button>`).join("")}</div>` : ""}
           ${approveBtn}
           <textarea class="growable-text comment-text" rows="1" placeholder="Répondre…"></textarea>
           <button class="send-comment">Send</button>
@@ -577,7 +593,7 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
       tagNote,
       runTime,
       sourceChip: core.sourceChip,
-      title: core.shortTitle,
+      title: questionTitle,
       miniThumb: core.miniThumbHTML,
       cancelBtn,
       marker: "",
@@ -596,17 +612,20 @@ function deriveCardView(msg, { pendingCounts } = {}) {
   return memoize(cardCache, msg, inputsKey, () => {
     const core = deriveCardCore(msg);
     const { items: details, blocks: detailBlocks } = detailsHTML(msg.details);
+    const context = msg.context ? `<div class="context md">${markdownHTML(msg.context)}</div>` : "";
+    const question = questionFirstBody(msg, `${context}${details ? `<ul>${details}</ul>` : ""}${detailBlocks}${core.threadHTML}`,
+      `${imagesHTML(msg.images, msg.id)}${videosHTML(msg.videos)}`);
 
     return {
       kindBadge: core.kindLabel,
-      title: core.fullTitle,
+      title: msg.state === "questions" && Questions.latest(msg)?.question ? esc(Questions.latest(msg).question) : core.fullTitle,
       project: msg.project ? `<span class="project">${esc(msg.project)}</span>` : "",
-      contextHTML: msg.context ? `<div class="context md">${markdownHTML(msg.context)}</div>` : "",
-      details,
-      detailBlocks,
-      images: imagesHTML(msg.images, msg.id),
-      videos: videosHTML(msg.videos),
-      options: optionsHTML(msg.options),
+      contextHTML: question || context,
+      details: question ? "" : details,
+      detailBlocks: question ? "" : detailBlocks,
+      images: question ? "" : imagesHTML(msg.images, msg.id),
+      videos: question ? "" : videosHTML(msg.videos),
+      options: question ? "" : optionsHTML(msg.options),
       isReview: msg.kind === "review",
       answeredHTML: msg.status === "answered" ? answeredSummaryHTML(msg.reply) : "",
     };
@@ -618,16 +637,18 @@ function deriveSentView(msg, delivered, { pendingCounts } = {}) {
   return memoize(sentCache, msg, inputsKey, () => {
     const core = deriveCardCore(msg);
     const read = Boolean(msg.acknowledgedAt);
+    const context = msg.context ? `<div class="context md">${markdownHTML(msg.context)}</div>` : "";
+    const question = questionFirstBody(msg, `${context}<div class="thread">${core.threadHTML}</div>${core.retroHTML}`, imagesHTML(msg.images));
     return {
       className: delivered ? "card sent answered" : "card sent",
       cancelable: !delivered && !read,
       approveBtn: core.canApprove,
       unseenDot: core.unseenActionable,
-      summaryTitle: core.summaryOrTitle,
-      contextHTML: msg.context ? `<div class="context md">${markdownHTML(msg.context)}</div>` : "",
-      images: imagesHTML(msg.images),
+      summaryTitle: msg.state === "questions" && Questions.latest(msg)?.question ? esc(Questions.latest(msg).question) : core.summaryOrTitle,
+      contextHTML: question || context,
+      images: question ? "" : imagesHTML(msg.images),
       miniThumb: core.miniThumbHTML,
-      thread: core.threadHTML,
+      thread: question ? "" : core.threadHTML,
       sub: sentSubline(msg, delivered, core.tail),
     };
   });
@@ -636,13 +657,15 @@ function deriveSentView(msg, delivered, { pendingCounts } = {}) {
 function overlayHeader(msg, blockedBy = []) {
   const core = deriveCardCore(msg, { blockedBy });
   const kindBadge = msg.direction === "agent" ? `<span class="kind-badge">${core.kindLabel}</span>` : "";
-  const subtitle = msg.summary ? `<div class="overlay-subtitle">${core.fullTitle}</div>` : "";
+  const decision = msg.state === "questions" ? Questions.latest(msg) : null;
+  const questionTitle = decision && !decision.error ? esc(decision.question) : core.shortTitle;
+  const subtitle = !decision && msg.summary ? `<div class="overlay-subtitle">${core.fullTitle}</div>` : "";
   return `
     <div class="overlay-head">
       <span class="overlay-id">${esc(msg.id)}</span>
       ${core.sourceChip}
       <div class="overlay-title-wrap">
-        <strong class="overlay-title">${core.shortTitle}</strong>
+        <strong class="overlay-title">${questionTitle}</strong>
         ${subtitle}
       </div>
       ${msg.state === "backlog" ? prioritySelectorHTML(msg.priority) : priorityChipHTML(msg.priority)}
@@ -666,15 +689,16 @@ function overlayAgentBody(msg) {
   const followupKey = `followup:${msg.id}`;
   const awaitingDecision = core.awaitingDecision;
 
-  const bodyHTML = `
+  const technicalHTML = `
     ${msg.context ? `<div class="context md">${markdownHTML(msg.context)}</div>` : ""}
     ${detailItems ? `<ul>${detailItems}</ul>` : ""}
     ${detailBlocks}
-    ${images ? `<div class="images">${images}</div>` : ""}
-    ${videos ? `<div class="videos">${videos}</div>` : ""}
     ${thread ? `<div class="thread">${thread}</div>` : ""}
     ${core.retroHTML}
   `;
+  const attachments = `${images ? `<div class="images">${images}</div>` : ""}${videos ? `<div class="videos">${videos}</div>` : ""}`;
+  const question = questionFirstBody(msg, technicalHTML, attachments);
+  const bodyHTML = question || `${msg.context ? `<div class="context md">${markdownHTML(msg.context)}</div>` : ""}${detailItems ? `<ul>${detailItems}</ul>` : ""}${detailBlocks}${attachments}${thread ? `<div class="thread">${thread}</div>` : ""}${core.retroHTML}`;
 
   const footerHTML =
     msg.status === "answered" && !awaitingDecision
@@ -686,7 +710,7 @@ function overlayAgentBody(msg) {
         <div class="pending-row" data-pending-key="${followupKey}"></div>`
       : `<div class="reply-row overlay-footer-row">
           ${msg.kind === "review" || msg.state === "approbation" ? `<button class="approve-btn">✅ Approuver</button>` : ""}
-          ${options}
+          ${question ? "" : options}
           <textarea class="growable-text reply-text" rows="1" placeholder="Commenter… (Ctrl+V ou glisse une image)"></textarea>
           <label class="attach-btn">📎<input type="file" accept="image/*,video/*" class="attach-input" hidden /></label>
           <button class="send-reply">Reply</button>
@@ -703,12 +727,13 @@ function overlayHumanBody(msg) {
   const commentKey = `comment:${msg.id}`;
   const approveBtn = core.canApprove ? `<button class="approve-issue-btn">✅ Approuver</button>` : "";
 
-  const bodyHTML = `
+  const technicalHTML = `
     ${msg.context ? `<div class="context md">${markdownHTML(msg.context)}</div>` : ""}
-    ${images ? `<div class="images">${images}</div>` : ""}
     ${thread ? `<div class="thread">${thread}</div>` : ""}
     ${core.retroHTML}
   `;
+  const attachments = images ? `<div class="images">${images}</div>` : "";
+  const bodyHTML = questionFirstBody(msg, technicalHTML, attachments) || `${msg.context ? `<div class="context md">${markdownHTML(msg.context)}</div>` : ""}${attachments}${thread ? `<div class="thread">${thread}</div>` : ""}${core.retroHTML}`;
 
   const footerHTML = `
     <div class="reply-row overlay-footer-row">
@@ -756,6 +781,7 @@ const Views = {
   lastNoteText,
   renderDetail,
   threadHTML,
+  questionFirstBody,
   threadTail,
   compactSubline,
   sentSubline,

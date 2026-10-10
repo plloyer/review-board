@@ -618,3 +618,20 @@ for (const endpoint of ["/mcp", "/mcp-live"]) {
     });
   });
 }
+
+test("HTTP Questions move requires an actual decision and serves the shared contract", async () => {
+  const task = store.addHumanMessage("HTTP investigation", []);
+  await withServer(async (base) => {
+    const before = JSON.stringify(store.list());
+    const response = await fetch(`${base}/api/messages/${task.id}/move`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ state: "questions", note: "Je compare les erreurs." }) });
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).error, /OWNER DECISION REQUIRED/);
+    assert.equal(JSON.stringify(store.list()), before);
+    const contract = await fetch(`${base}/shared/questions.js`);
+    assert.equal(contract.status, 200);
+    assert.match(await contract.text(), /requireDecision/);
+    const accepted = await fetch(`${base}/api/messages/${task.id}/move`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ state: "questions", note: "Question : Valides-tu cet affichage ?\nA : Garder cet affichage.\nB : Garder le précédent.\nRecommandation : A pour sa lisibilité.\nConséquence : Le prochain écran utilise cet affichage." }) });
+    assert.equal(accepted.status, 200);
+    assert.equal((await accepted.json()).state, "questions");
+  });
+});

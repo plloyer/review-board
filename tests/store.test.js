@@ -7,6 +7,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const Lifecycle = require("../shared/lifecycle");
+const QUESTION = "Question : Valides-tu cet affichage ?\nA : Garder cet affichage.\nB : Garder le précédent.\nRecommandation : A pour sa lisibilité.\nConséquence : Le prochain écran utilise cet affichage.";
 const AGENT = { vendor: "claude", model: "Fable 5.1", effort: "max" };
 
 function freshStore() {
@@ -228,7 +229,7 @@ test("agentReply defaults kind to 'update'", () => {
 test("agentReply stores an explicit kind", () => {
   const { store } = freshStore();
   const h1 = store.addHumanMessage("bug report", []);
-  const updated = store.agentReply(h1.id, "should I use approach A or B?", "question");
+  const updated = store.agentReply(h1.id, QUESTION, "question");
   assert.equal(updated.thread[0].kind, "question");
 });
 
@@ -242,7 +243,7 @@ test("agentReply applies stateAfterAgentReply itself: question -> questions, don
   const h1 = store.addHumanMessage("bug report", []); // state: backlog
   store.agentReply(h1.id, "still on it", "update");
   assert.equal(store.list().find((m) => m.id === h1.id).state, "backlog", "kind update must not move the card");
-  store.agentReply(h1.id, "which environment?", "question");
+  store.agentReply(h1.id, QUESTION, "question");
   assert.equal(store.list().find((m) => m.id === h1.id).state, "questions");
   store.agentReply(h1.id, "fixed, ready for review", "done");
   assert.equal(store.list().find((m) => m.id === h1.id).state, "approbation");
@@ -416,7 +417,7 @@ test("createTask files an agent-originated project task as a human-shaped card",
 
 test("addAgentMessage maps kind to an initial state: question -> questions, note -> in_progress, review -> approbation", () => {
   const { store } = freshStore();
-  assert.equal(store.addAgentMessage({ title: "q", kind: "question" }).state, "questions");
+  assert.equal(store.addAgentMessage({ title: "Display choice", context: QUESTION, kind: "question" }).state, "questions");
   assert.equal(store.addAgentMessage({ title: "n", kind: "note" }).state, "in_progress");
   assert.equal(store.addAgentMessage({ title: "r", kind: "review" }).state, "approbation");
 });
@@ -446,8 +447,8 @@ test("moveTask stamps startedAt on entry into in_progress only, so the card show
   const first = store.moveTask(task.id, "in_progress").startedAt;
   assert.ok(first);
   assert.equal(store.moveTask(task.id, "in_progress").startedAt, first, "a re-move within in_progress keeps the clock");
-  store.moveTask(task.id, "questions");
-  assert.equal(store.moveTask(task.id, "questions").startedAt, first, "leaving in_progress does not restamp");
+  store.moveTask(task.id, "questions", QUESTION);
+  assert.equal(store.moveTask(task.id, "questions", QUESTION).startedAt, first, "leaving in_progress does not restamp");
 });
 
 test("moveTask stamps stateSince when the state changes, not on a re-move", () => {
@@ -500,7 +501,7 @@ test("agentReply does not move a card OUT of closed/landing via its automatic ki
   const { store } = freshStore();
   const h1 = store.addHumanMessage("bug report", []);
   store.moveTask(h1.id, "closed");
-  const updated = store.agentReply(h1.id, "one more question", "question");
+  const updated = store.agentReply(h1.id, QUESTION, "question");
   assert.equal(updated.state, "closed", "must not move backward to questions");
   assert.equal(updated.thread.at(-1).kind, "question");
 
@@ -520,7 +521,7 @@ test("moveTask re-asking an answered agent card into questions resets it to open
   assert.equal(before.status, "answered");
   assert.ok(before.acknowledgedAt);
 
-  const reAsked = store.moveTask(a1.id, "questions");
+  const reAsked = store.moveTask(a1.id, "questions", QUESTION);
   assert.equal(reAsked.status, "open", "re-ask must flip status back to open so the badge/notifier fires again");
   assert.ok(!reAsked.acknowledgedAt, "acknowledgedAt must be cleared");
   assert.ok(!reAsked.readAt, "readAt must be cleared");
@@ -537,12 +538,12 @@ test("moveTask leaves status/acknowledgedAt alone when the target isn't question
   assert.equal(moved.status, "answered", "only a move into questions resets status");
   assert.ok(moved.acknowledgedAt);
 
-  const a2 = store.addAgentMessage({ title: "Fresh question", kind: "question" }); // already status open
-  const moved2 = store.moveTask(a2.id, "questions");
+  const a2 = store.addAgentMessage({ title: "Fresh question", context: QUESTION, kind: "question" }); // already status open
+  const moved2 = store.moveTask(a2.id, "questions", QUESTION);
   assert.equal(moved2.status, "open");
 
   const human = store.createTask({ title: "A human-shaped task" });
-  const moved3 = store.moveTask(human.id, "questions"); // direction human, guard must not apply
+  const moved3 = store.moveTask(human.id, "questions", QUESTION); // direction human, guard must not apply
   assert.equal(moved3.direction, "human");
   assert.equal(moved3.status, "open");
 });
@@ -827,12 +828,12 @@ test("moveTask(actor 'agent') refuses landing/closed on a normal card, with an i
   assert.equal(store.list().find((m) => m.id === task.id).state, "in_progress", "refused move must leave state untouched");
 });
 
-test("moveTask(actor 'agent') to a non-landing/closed state is never gated beyond the agent declaration", () => {
+test("moveTask(actor 'agent') to a non-landing/closed state requires the agent declaration and a real owner question", () => {
   const { store } = freshStore();
   const task = store.createTask({ title: "Do the thing" });
   const moved = store.moveTask(task.id, "in_progress", null, { actor: "agent", agent: AGENT });
   assert.equal(moved.state, "in_progress");
-  assert.equal(store.moveTask(task.id, "questions", null, { actor: "agent" }).state, "questions");
+  assert.equal(store.moveTask(task.id, "questions", QUESTION, { actor: "agent" }).state, "questions", QUESTION);
 });
 
 test("moveTask(actor 'agent') into in_progress needs an agent declaration unless the card already carries one", () => {
@@ -921,7 +922,7 @@ test("createTask accepts noReview and stores it on the card", () => {
 test("humanThreadNote on a questions-state card moves it back to in_progress (his answer unblocks it)", () => {
   const { store } = freshStore();
   const h = store.addHumanMessage("issue", []);
-  store.agentReply(h.id, "need your call", "question");
+  store.agentReply(h.id, QUESTION, "question");
   assert.equal(store.list().find((m) => m.id === h.id).state, "questions");
   store.humanThreadNote(h.id, "voila ma reponse");
   assert.equal(store.list().find((m) => m.id === h.id).state, "in_progress");
@@ -929,7 +930,7 @@ test("humanThreadNote on a questions-state card moves it back to in_progress (hi
 
 test("humanThreadNote on an answered agent card lands in that card's thread and shows in its overlay", () => {
   const { store } = freshStore();
-  const a = store.addAgentMessage({ title: "Keep it?", kind: "question", options: ["Oui", "Non"] });
+  const a = store.addAgentMessage({ title: "Display choice", context: QUESTION, kind: "question" });
   store.reply(a.id, { optionChosen: "Oui" });
   store.humanThreadNote(a.id, "et retire l'interdiction");
   const card = store.list().find((m) => m.id === a.id);
@@ -1058,7 +1059,7 @@ test("tags: createTask and moveTask store them normalized; a human message deriv
   assert.deepEqual(store.list().find((m) => m.id === task.id).tags, ["linux", "3c-unity"]);
   store.moveTask(task.id, "in_progress", null, { actor: "agent", agent: AGENT, tags: ["windows"] });
   assert.deepEqual(store.list().find((m) => m.id === task.id).tags, ["windows"]);
-  store.moveTask(task.id, "questions", null, { actor: "agent", tags: [] });
+  store.moveTask(task.id, "questions", QUESTION, { actor: "agent", tags: [] });
   assert.equal(store.list().find((m) => m.id === task.id).tags, undefined, "an empty list clears the tags");
 
   const human = store.addHumanMessage("Le menu #Linux plante au boot #3c-unity\n# pas un tag", []);
@@ -1089,4 +1090,18 @@ test("F7 reports go straight to backlog; cards left in the old report_review int
   for (const card of migrated) assert.equal(card.reportApproval, undefined);
   assert.equal(migrated.find((m) => m.id === "u1").title, "[F7] Pending", "an old F7 card shows the [F7] prefix");
   assert.ok(require("../server/store").peekDeliverable().some((m) => m.id === "u1"));
+});
+
+test("Questions writes reject missing, multiple and progress-only decisions atomically", () => {
+  const { store } = freshStore();
+  const card = store.addHumanMessage("Technical investigation", []);
+  const before = JSON.stringify(store.list());
+  for (const text of ["Je compare les erreurs.", QUESTION.replace("Valides-tu cet affichage ?", "Valides-tu cet affichage ? Autorises-tu cette dépense ?"), QUESTION.replace("Valides-tu cet affichage ?", "Le traitement est-il en cours ?")]) {
+    assert.throws(() => store.agentReply(card.id, text, "question"), /OWNER DECISION REQUIRED/);
+    assert.throws(() => store.moveTask(card.id, "questions", text), /OWNER DECISION REQUIRED/);
+    assert.throws(() => store.addAgentMessage({ title: "Investigation", context: text, kind: "question" }), /OWNER DECISION REQUIRED/);
+    assert.equal(JSON.stringify(store.list()), before);
+  }
+  store.agentReply(card.id, "Investigation continues; no owner decision.", "update");
+  assert.equal(store.list()[0].state, "backlog");
 });

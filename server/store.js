@@ -16,6 +16,7 @@ const {
   currentPlayerReportTitle,
 } = require("../shared/lifecycle");
 const { agentRequiredText } = require("../shared/agents");
+const Questions = require("../shared/questions");
 
 // ponytail: flat JSON file + in-memory array, single local user, no DB needed.
 const DATA_DIR = process.env.REVIEW_BOARD_DATA_DIR || path.join(__dirname, "..", "data");
@@ -263,6 +264,7 @@ function ingestFile(entry) {
 }
 
 function addAgentMessage({ title, kind = "review", options, context, details, images, videos, project }) {
+  if (kind === "question") Questions.requireDecision(context, options, title);
   const id = `r${state.nextAgentId++}`;
   const msg = {
     id,
@@ -464,6 +466,10 @@ function moveTask(id, newState, note, opts = {}) {
   const msg = state.messages.find((m) => m.id === id);
   if (!msg) throw new Error(`No message ${id}`);
   validatePriority(priority);
+  if (newState === "questions") {
+    const decision = note ? Questions.requireDecision(note) : Questions.latest(msg);
+    if (!decision || decision.error) throw new Error("OWNER DECISION REQUIRED: provide one current question; progress belongs in En cours");
+  }
 
   // The bypass this gate exists to close: an agent moving straight to landing/
   // closed, skipping the human's approbation review. Only actor "agent" is
@@ -517,7 +523,7 @@ function moveTask(id, newState, note, opts = {}) {
     if (!msg.acknowledgedAt) msg.acknowledgedAt = now;
     if (!msg.readAt) msg.readAt = now;
   }
-  if (note) msg.thread = [...(msg.thread || []), { from: "agent", text: note, kind: "update", at: new Date().toISOString() }];
+  if (note) msg.thread = [...(msg.thread || []), { from: "agent", text: note, kind: newState === "questions" ? "question" : "update", at: new Date().toISOString() }];
   if (blockers !== undefined) msg.blockedBy = blockers;
   if (priority !== undefined) msg.priority = priority;
   // Back in backlog nobody works the card; elsewhere the last declaration stays
@@ -702,6 +708,7 @@ function agentReply(id, text, kind = "update", opts = {}) {
   const msg = state.messages.find((m) => m.id === id);
   if (!msg) throw new Error(`No message ${id}`);
   if (msg.direction !== "human") throw new Error(`Message ${id} is not a human message`);
+  if (kind === "question") Questions.requireDecision(text);
   msg.thread = [...(msg.thread || []), { from: "agent", text, kind, at: new Date().toISOString() }];
   const next = stateAfterAgentReply(kind);
   // Never backward out of closed/landing, same as stateAfterReply's guard — a
