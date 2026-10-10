@@ -1654,6 +1654,23 @@ document.getElementById("compose").addEventListener("submit", async (e) => {
 // iOS Safari (and any backgrounded tab) can pause/drop the SSE connection silently;
 // refresh on every (re)connect too, not just on a push, so a missed event while
 // disconnected doesn't leave the page stale until the next unrelated change.
+// Consent binds the visible digest. No button invokes or claims native approval.
+document.addEventListener("click", async event => {
+  const button = event.target.closest(".execution-consent");
+  if (!button) return;
+  button.disabled = true;
+  try {
+    const response = await fetch(`/api/messages/${encodeURIComponent(button.dataset.card)}/execution-consent`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ actionId: button.dataset.action, decision: button.dataset.decision }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error);
+    await refresh();
+  } catch (error) { alert(`Consentement non enregistré : ${error.message}`); }
+  finally { button.disabled = false; }
+});
+
 const stream = new EventSource("/api/events");
 stream.addEventListener("open", refresh);
 stream.addEventListener("message", refresh);

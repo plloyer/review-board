@@ -20,6 +20,7 @@
 // everything but the final window.Views assignment private to this file.
 (function () {
 const LocalLifecycle = typeof module !== "undefined" ? require("../shared/lifecycle") : window.Lifecycle;
+const ExecutionView = typeof module !== "undefined" ? require("./execution-view") : window.ExecutionView;
 const { AGENT_VENDORS } = typeof module !== "undefined" ? require("../shared/agents") : window.Agents;
 const Questions = typeof module !== "undefined" ? require("../shared/questions") : window.Questions;
 const { lastThreadEntry, isActionableThreadEntry, unseenActionable, agentAwaitingDecision, awaitingAgent, STATE_LABEL } = LocalLifecycle;
@@ -472,6 +473,8 @@ function messageFingerprint(msg, extra = {}) {
     (msg.images || []).map((i) => i.path),
     (msg.videos || []).map((v) => v.path),
     msg.retro || null,
+    msg.executionTrace || null,
+    msg.execution || null,
     extra.blockedNow || [],
     extra.pendingCounts || null,
     extra.delivered,
@@ -517,7 +520,7 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
     const priorityChip = priorityChipHTML(msg.priority);
     const agentMark = agentMarkHTML(msg.agent);
     const tagNote = tagNoteHTML(msg.tags);
-    const runTime = runTimeHTML(msg);
+    const runTime = runTimeHTML(msg) + ExecutionView.summary(msg);
     // The × belongs to backlog cards only: once a card left backlog it never shows.
     const undelivered = msg.state === "backlog" && msg.direction === "human" && !msg.replyTo && !msg.lastDeliveredAt && !msg.acknowledgedAt;
     const cancelBtn = undelivered ? `<button class="cancel-sent" title="Annuler">×</button>` : "";
@@ -622,7 +625,7 @@ function deriveCardView(msg, { pendingCounts } = {}) {
       project: msg.project ? `<span class="project">${esc(msg.project)}</span>` : "",
       contextHTML: question || context,
       details: question ? "" : details,
-      detailBlocks: question ? "" : detailBlocks,
+      detailBlocks: (question ? "" : detailBlocks) + ExecutionView.render(msg),
       images: question ? "" : imagesHTML(msg.images, msg.id),
       videos: question ? "" : videosHTML(msg.videos),
       options: question ? "" : optionsHTML(msg.options),
@@ -698,7 +701,7 @@ function overlayAgentBody(msg) {
   `;
   const attachments = `${images ? `<div class="images">${images}</div>` : ""}${videos ? `<div class="videos">${videos}</div>` : ""}`;
   const question = questionFirstBody(msg, technicalHTML, attachments);
-  const bodyHTML = question || `${msg.context ? `<div class="context md">${markdownHTML(msg.context)}</div>` : ""}${detailItems ? `<ul>${detailItems}</ul>` : ""}${detailBlocks}${attachments}${thread ? `<div class="thread">${thread}</div>` : ""}${core.retroHTML}`;
+  const bodyHTML = (question || `${msg.context ? `<div class="context md">${markdownHTML(msg.context)}</div>` : ""}${detailItems ? `<ul>${detailItems}</ul>` : ""}${detailBlocks}${attachments}${thread ? `<div class="thread">${thread}</div>` : ""}${core.retroHTML}`) + ExecutionView.render(msg);
 
   const footerHTML =
     msg.status === "answered" && !awaitingDecision
@@ -733,7 +736,7 @@ function overlayHumanBody(msg) {
     ${core.retroHTML}
   `;
   const attachments = images ? `<div class="images">${images}</div>` : "";
-  const bodyHTML = questionFirstBody(msg, technicalHTML, attachments) || `${msg.context ? `<div class="context md">${markdownHTML(msg.context)}</div>` : ""}${attachments}${thread ? `<div class="thread">${thread}</div>` : ""}${core.retroHTML}`;
+  const bodyHTML = (questionFirstBody(msg, technicalHTML, attachments) || `${msg.context ? `<div class="context md">${markdownHTML(msg.context)}</div>` : ""}${attachments}${thread ? `<div class="thread">${thread}</div>` : ""}${core.retroHTML}`) + ExecutionView.render(msg);
 
   const footerHTML = `
     <div class="reply-row overlay-footer-row">

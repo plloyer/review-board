@@ -17,6 +17,7 @@ const {
 } = require("../shared/lifecycle");
 const { agentRequiredText } = require("../shared/agents");
 const Questions = require("../shared/questions");
+const executionTrace = require("./execution-trace");
 
 // ponytail: flat JSON file + in-memory array, single local user, no DB needed.
 const DATA_DIR = process.env.REVIEW_BOARD_DATA_DIR || path.join(__dirname, "..", "data");
@@ -592,6 +593,45 @@ function list() {
   return state.messages;
 }
 
+// Facts are journaled on the owning card, independently of its delivery state.
+// No request body can register a native grant or enable execution.
+function recordExecutionEvent(id, event, actor = "agent") {
+  const msg = state.messages.find(message => message.id === id);
+  if (!msg) throw new Error(`No message ${id}`);
+  for (const card of [...state.messages, ...state.history]) {
+    if (card.id !== id && (card.executionTrace?.events || []).some(entry => entry.id === event.id ||
+      (event.type === "observed" && entry.type === "observed" && entry.actionId === event.actionId)))
+      throw new Error(`execution evidence already belongs to ${card.id}`);
+  }
+  const updated = executionTrace.append(msg.executionTrace, event);
+  if (!updated.changed) return msg;
+  const previousTrace = msg.executionTrace, previousExecution = msg.execution;
+  msg.executionTrace = updated.trace;
+  msg.execution = executionTrace.project(updated.trace);
+  try { save(state, { author: actor, kind: event.type === "consent" ? "execution_consent" : "execution_evidence" }); }
+  catch (error) {
+    if (previousTrace) msg.executionTrace = previousTrace; else delete msg.executionTrace;
+    if (previousExecution) msg.execution = previousExecution; else delete msg.execution;
+    throw error;
+  }
+  emitChange();
+  return msg;
+}
+
+// The human consents on the board to the digest they actually saw. A stale
+// browser cannot authorize a new destination, revision or command.
+function consentExecution(id, { actionId, decision }) {
+  const msg = state.messages.find(message => message.id === id);
+  if (!msg) throw new Error(`No message ${id}`);
+  if (!msg.executionTrace || msg.executionTrace.currentActionId !== actionId) throw new Error("stale execution action");
+  if (!["approved", "rejected"].includes(decision)) throw new Error("invalid consent decision");
+  const current = executionTrace.project(msg.executionTrace).consent;
+  if (current?.decision === decision) return msg;
+  return recordExecutionEvent(id, { id: `board-consent:${id}:${require("crypto").randomUUID()}`,
+    actionId, type: "consent", at: new Date().toISOString(), source: "board_human_input",
+    boardReceipt: `${id}:${actionId}`, decision }, "human");
+}
+
 // Everything "deliverable" to the agent (answered agent-messages + open human-messages).
 // At-least-once delivery: this is a non-destructive peek — items stay in the live queue
 // (stamped with lastDeliveredAt) until the agent explicitly calls acknowledge().
@@ -825,6 +865,8 @@ function archive(id) {
 }
 
 module.exports = {
+  recordExecutionEvent,
+  consentExecution,
   replayEvents,
   publishCompletion,
   DATA_DIR,

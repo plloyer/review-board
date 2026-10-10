@@ -170,6 +170,16 @@ function buildServer() {
     { capabilities: { logging: {} }, instructions: WORKFLOW_INSTRUCTIONS }
   );
 
+  server.registerTool("record_execution_event", {
+    description: "Record immutable, action-scoped execution evidence on an existing card. Reports denial, consent readback, publication and activation separately. Never grants native permission or retries an action. See docs/execution-trace.md for the contract.",
+    inputSchema: { cardId: z.string().min(1), event: z.record(z.unknown()) },
+  }, async ({ cardId, event }) => {
+    try {
+      const card = store.recordExecutionEvent(cardId, event);
+      return { content: [{ type: "text", text: JSON.stringify(card.execution) }] };
+    } catch (error) { return { isError: true, content: [{ type: "text", text: error.message }] }; }
+  });
+
   server.registerTool(
     "send_message",
     {

@@ -381,3 +381,12 @@ body.overlay-open { overflow: hidden; }
 .question-details { margin-top: 16px; border-top: 1px solid var(--border, #3a3a3a); padding-top: 12px; }
 .question-details > summary { cursor: pointer; font-weight: 600; }
 .question-details[open] > summary { margin-bottom: 12px; }
+
+.execution-trace { margin: 16px 0; padding: 14px; border: 1px solid #7776; border-radius: 8px; }
+.execution-trace dl { display: grid; grid-template-columns: minmax(90px, 1fr) 3fr; gap: 6px 14px; }
+.execution-trace dt { font-weight: 600; }
+.execution-trace dd { margin: 0; overflow-wrap: anywhere; }
+.execution-trace p { font-size: 0.9em; line-height: 1.45; }
+.execution-trace ol { padding-left: 20px; overflow-wrap: anywhere; }
+.execution-trace pre { white-space: pre-wrap; font-size: 0.85em; }
+.execution-status { display: block; font-size: 0.85em; margin-top: 4px; }

@@ -120,6 +120,15 @@ function createApp({ clipboard } = {}) {
   web.get("/api/reviews", (_req, res) => res.json(store.list()));
   web.get("/api/history", (_req, res) => res.json(store.history()));
 
+  web.post("/api/messages/:id/execution-events", (req, res) => {
+    try { res.json(store.recordExecutionEvent(req.params.id, req.body || {})); }
+    catch (error) { res.status(409).json({ error: error.message }); }
+  });
+  web.post("/api/messages/:id/execution-consent", (req, res) => {
+    try { res.json(store.consentExecution(req.params.id, req.body || {})); }
+    catch (error) { res.status(409).json({ error: error.message }); }
+  });
+
   web.post("/api/reviews/:id/reply", (req, res) => {
     try {
       const msg = store.reply(req.params.id, req.body || {});
