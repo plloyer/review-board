@@ -6,7 +6,7 @@
   // A request addressed to the owner; a technical adjective such as "test valide"
   // is not a decision. Unsupported phrasing is refused rather than guessed.
   const ownerAction = /^(?:(?:valides|validez|acceptes|acceptez|approuves|approuvez|autorises|autorisez|choisis|choisissez|préfères|préférez|gardes|gardez|veux|voulez|souhaites|souhaitez)[- ](?:tu|vous)\b|(?:on|nous|tu|vous)\s+(?:valide|validons|accept|approuv|autoris|chois|préf|gard|publi|lanc|utilis)[a-zéèê-]*\b|quel(?:le)?\b.*\b(?:mettre|choisir|garder|retenir|utiliser)\b|(?:do you want|would you like|can we|shall we|should we|keep it|choose|approve|allow|accept|prefer)\b)/i;
-  const secondAction = /\b(?:et|puis|ainsi que|aussi|également|and|then|also)\b|,\s*(?:tu|vous|on|nous|you|we)\b/i;
+  const secondAction = /\b(?:et|puis|ainsi que|aussi|egalement|and|then|also)\b|[;/]|\bplus\s+(?:le|la|les|un|une|des|ce|cet|cette|ces)\b|,\s*(?:tu|vous|on|nous|you|we)\b/i;
 
   function parse(text, suppliedOptions = [], title = "") {
     const body = String(text || "").replace(/\nPosted by:[\s\S]*$/i, "").trim();
@@ -26,7 +26,8 @@
     const unique = [...new Set(candidates.map((value) => value.trim()))];
     if (unique.length !== 1) return { error: "one precise owner decision is required; progress belongs in En cours" };
     const question = unique[0].replace(/^\[[^\]]+\]\s*/, "");
-    if (!ownerAction.test(question) || secondAction.test(question)) {
+    const plainQuestion = question.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    if (!ownerAction.test(question) || secondAction.test(plainQuestion)) {
       return { error: "ask one owner choice or approval; investigation and progress belong in En cours" };
     }
     let options = Array.isArray(suppliedOptions) ? suppliedOptions.map(String).filter((value) => value.trim()) : [];

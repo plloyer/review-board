@@ -46,3 +46,11 @@ test("review probes: common French owner choices are accepted without keyword ad
     assert.equal(Questions.requireDecision(valid.replace("Valides-tu cet affichage ?", question)).question, question);
   }
 });
+
+test("known closure counterexamples cannot bundle a second decision", () => {
+  for (const question of ["Valides-tu le texte; tu choisis le cadre ?", "Valides-tu le texte / choisis-tu le cadre ?",
+    "Valides-tu le texte plus le cadre ?", "Valides-tu le texte également le cadre ?"]) {
+    assert.throws(() => Questions.requireDecision(valid.replace("Valides-tu cet affichage ?", question)), /OWNER DECISION REQUIRED/);
+  }
+  assert.equal(Questions.requireDecision(valid.replace("Valides-tu cet affichage ?", "Veux-tu plus de contraste ?")).question, "Veux-tu plus de contraste ?");
+});
