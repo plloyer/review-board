@@ -605,3 +605,17 @@ test("MCP rejects progress-only Questions without changing the card", async () =
   assert.equal(JSON.stringify(store.list()), before);
   await client.close();
 });
+
+test("MCP validates every Questions message before committing a mixed batch", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  const response = await client.callTool({ name: "send_message", arguments: { messages: [
+    { title: "FYI", kind: "note" },
+    { title: "Technical investigation", kind: "question", context: "Je compare les erreurs." },
+  ] } });
+  assert.equal(response.isError, true);
+  assert.match(response.content[0].text, /OWNER DECISION REQUIRED/);
+  assert.deepEqual(store.list(), []);
+  assert.equal(store.addAgentMessage({ title: "A real note", kind: "note" }).id, "r1");
+  await client.close();
+});

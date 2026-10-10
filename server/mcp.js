@@ -204,6 +204,10 @@ function buildServer() {
     async ({ messages }) => {
       const missing = missingLocalPaths(messages);
       if (missing.length) return { isError: true, content: [{ type: "text", text: attachmentErrorText(missing) }] };
+      // Validate the complete batch before the first card or id is persisted.
+      for (const message of messages) {
+        if (message.kind === "question") require("../shared/questions").requireDecision(message.context, message.options, message.title);
+      }
       const created = messages.map((m) => store.addAgentMessage(m));
       return { content: [{ type: "text", text: created.map((m) => m.id).join(", ") }] };
     }

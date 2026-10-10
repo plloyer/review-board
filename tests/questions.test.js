@@ -31,3 +31,18 @@ test("a later owner answer makes a previous question historical", () => {
 });
 
 module.exports.validQuestion = valid;
+
+test("review probes: technical adjectives, bundled choices and Details cannot invent decisions", () => {
+  for (const question of ["Le test de hash est-il valide ?", "Is the build acceptable after the rerun ?",
+    "Valides-tu le texte ainsi que le nouveau cadre et la couleur ?", "Valides-tu le texte, tu choisis aussi le cadre ?"]) {
+    assert.throws(() => Questions.requireDecision(valid.replace("Valides-tu cet affichage ?", question)), /OWNER DECISION REQUIRED/);
+  }
+  const notesAsChoices = "Question : Valides-tu cet affichage ?\nRecommandation : Garder cet affichage.\nConséquence : La partie utilise cet affichage.\nDétails :\na. relancé le test\nb. capture refaite";
+  assert.throws(() => Questions.requireDecision(notesAsChoices), /distinct possible answers/);
+});
+
+test("review probes: common French owner choices are accepted without keyword adjectives", () => {
+  for (const question of ["On publie la nouvelle version sur Steam ce soir ?", "Veux-tu qu'on lance la partie à trois ce soir ?", "Quel cadre mettre autour des portraits ?"]) {
+    assert.equal(Questions.requireDecision(valid.replace("Valides-tu cet affichage ?", question)).question, question);
+  }
+});
