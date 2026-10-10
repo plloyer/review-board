@@ -55,6 +55,7 @@ Add to that project's `.mcp.json`:
 | `send_message` | AI → you | Non-blocking, batch of messages, returns ids |
 | `await_replies` | you → AI | Blocks (default 120s, max 240s); call again on timeout |
 | `list_messages` | — | Current queue with direction/kind/status |
+| `get_message` | - | One exact card/reply/direct thread; operator-scoped, default deny, at most 32 KiB; no acknowledgement. [Contract](docs/targeted-card-read.md) |
 | `withdraw_messages` | — | Retire messages the AI solved itself |
 
 A message: `title` (required), `kind` (`review` default / `question` / `note`),

@@ -593,6 +593,11 @@ function list() {
   return state.messages;
 }
 
+// Exact-id, read-only projection; never peeks, delivers, acknowledges or journals.
+function getMessage(parameters) {
+  return require("./card-read").readMessage(parameters, state);
+}
+
 // Facts are journaled on the owning card, independently of its delivery state.
 // No request body can register a native grant or enable execution.
 function recordExecutionEvent(id, event, actor = "agent") {
@@ -865,6 +870,7 @@ function archive(id) {
 }
 
 module.exports = {
+  getMessage,
   recordExecutionEvent,
   consentExecution,
   replayEvents,

@@ -143,7 +143,7 @@ function missingTextRefs(text) {
 // Stateless HTTP has no tools/list_changed channel, so the version rides every
 // await_replies trailer instead — a session that connected under an older
 // version learns from the delivery text that its cached tool list is stale.
-const TOOLS_VERSION = "v12"; // v12: F7 player reports land straight in backlog, no intake approval
+const TOOLS_VERSION = "v13"; // v13: scoped, bounded get_message; v12: direct F7 backlog
 
 function buildServer() {
   // The workflow travels with the MCP handshake so every client learns it without
@@ -151,6 +151,7 @@ function buildServer() {
   const WORKFLOW_INSTRUCTIONS = [
     `Review-board workflow (tools ${TOOLS_VERSION}). States: backlog -> in_progress -> questions -> approbation -> landing -> closed.`,
     "Loop: await_replies (at-least-once: acknowledge_messages after reading, or items redeliver; ack = READ, never fixed).",
+    "Focused decision read: get_message reads one exact card and its direct thread only, without delivery or acknowledgement. Server-side exact-id scope must allow that card; this read grants no native permission. Never fall back to a global dump after a denied read.",
     "Pick work: the human's feedback backlog cards outrank projet tasks. Player-filed F7 cards ('[F7] ' titles) land in backlog like any feedback card. File your own tasks with create_task.",
     "Dependencies: set_blockers / blocked_by on create_task/move_task (blocked until blockers reach landing/closed; you get a \"débloquée\" delivery). Priority: set_priority / priority 0-3 (0 = critical, 1 = highest, then in order).",
     "Tags (create_task/move_task tags, listed by list_messages as tags: a,b) say who CAN take a card: windows / mac / linux, unity (needs a Unity pass), or a machine name. Never start a card whose tags exclude your machine; no tag = anyone.",
@@ -169,6 +170,21 @@ function buildServer() {
     { name: "review-board", version: "1.0.0" },
     { capabilities: { logging: {} }, instructions: WORKFLOW_INSTRUCTIONS }
   );
+
+  server.registerTool("get_message", {
+    description: "Read one exact card's text, exact reply/choice/decision and direct associated thread, live or archived. Requires operator-configured exact-id scope (default deny). At most 32 KiB, no attachment paths/bytes, search, batch, parent/sibling expansion, delivery, acknowledgement or permission grant. Text references remain literal; no files are read. Explicit omitted thread count; oversized primary decisions fail without truncation. Do not substitute another reader after an access denial.",
+    inputSchema: z.object({
+      id: z.string().regex(require("./card-read").CARD_ID).max(13).describe("One exact card id, such as r293; no prefix, wildcard or array."),
+      threadLimit: z.number().int().min(0).max(50).default(20).describe("Maximum newest direct thread items; zero returns the card and exact reply only."),
+    }).strict(),
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, async parameters => {
+    try {
+      return { content: [{ type: "text", text: JSON.stringify(store.getMessage(parameters)) }] };
+    } catch (error) {
+      return { isError: true, content: [{ type: "text", text: error.message }] };
+    }
+  });
 
   server.registerTool("record_execution_event", {
     description: "Record immutable, action-scoped execution evidence on an existing card. Reports denial, consent readback, publication and activation separately. Never grants native permission or retries an action. See docs/execution-trace.md for the contract.",
