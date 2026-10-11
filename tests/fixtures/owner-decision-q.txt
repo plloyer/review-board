@@ -1,0 +1,8 @@
+Le chef d'orchestre n'est plus en ligne : l'ancien pilote Codex a disparu, mais le système le croit encore vivant et bloque tout nouveau départ. Treize cartes en cours attendent depuis des heures.
+
+Je propose de relancer le chef d'orchestre avec Claude Opus 5.5 (ton abonnement Claude Max), au même endroit, sans toucher aux autres agents ni au verrou, puis de reprendre une carte déjà en cours, comme celle-ci.
+
+- OUI : tu autorises cette relance maintenant (recommandé).
+- NON : on attend.
+
+Tu autorises la relance du chef d'orchestre avec Claude Opus 5.5 ?

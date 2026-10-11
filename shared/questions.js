@@ -22,7 +22,8 @@
     }
     const explicit = sections.question !== undefined;
     const source = explicit ? sections.question : [title, body].filter(Boolean).join("\n");
-    const candidates = source.split(/\n/).filter((line) => !choices.test(line)).join("\n").match(/[^.!?\n]*\?/g) || [];
+    // A dot between digits belongs to a version, not a sentence boundary.
+    const candidates = source.split(/\n/).filter((line) => !choices.test(line)).join("\n").match(/(?:[^.!?\n]|\d\.(?=\d))*\?/g) || [];
     const unique = [...new Set(candidates.map((value) => value.trim()))];
     if (unique.length !== 1) return { error: "one precise owner decision is required; progress belongs in En cours" };
     const question = unique[0].replace(/^\[[^\]]+\]\s*/, "");
@@ -35,7 +36,11 @@
     if (!options.length) options = answerSource.split(/\r?\n/).map((line) => line.match(choices)).filter(Boolean).map((match) => `${match[1].toUpperCase()} : ${match[2]}`);
     if (!options.length && /\bOUI\b[\s\S]*\bNON\b|\bNON\b[\s\S]*\bOUI\b/i.test(answerSource)) options = ["OUI", "NON"];
     if (options.length < 2 || options.length > 8 || new Set(options).size !== options.length) return { error: "give two or more distinct possible answers" };
-    const recommendation = (sections.recommandation || (body.match(/(?:Je recommande|Je conseille)[^\n]*/i) || [])[0] || "").trim();
+    const recommendedOptions = answerSource.split(/\r?\n/).filter((line) =>
+      /^\s*(?:[-*]\s*)?(?:[A-H]|OUI|NON)\s*[:).\u2014-]\s*.*\(\s*recommande(?:e)?\s*\)/i
+        .test(line.normalize("NFD").replace(/[\u0300-\u036f]/g, "")));
+    const recommendation = (sections.recommandation || (body.match(/(?:Je recommande|Je conseille)[^\n]*/i) || [])[0]
+      || (recommendedOptions.length === 1 ? recommendedOptions[0] : "")).trim();
     if (!recommendation) return { error: "give your recommendation" };
     const consequence = (sections.consequence || "").trim();
     if (explicit && !consequence) return { error: "give the consequence of this owner decision" };

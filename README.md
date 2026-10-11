@@ -81,6 +81,15 @@ Add any of these when they're actually missed.
 Run `node --test tests/*.test.js` (or `npm test`) before restarting the app after
 changes to `server/`. Tests run against a temp data dir and never touch `data/`.
 
+Owner questions use `shared/questions.js` in the browser and server. A local client
+can pass JSON `{"text":"..."}` on stdin to `node tools/validate-question.js` and read
+the same parser result on stdout, without loading the store or using the network.
+The contract preserves decimal versions such as `5.5` and accepts one clearly
+marked recommended answer `(recommandé)` or `(recommandée)`, as well as the existing
+explicit recommendation forms. Unrelated, negated or multiple marked answers do
+not supply a recommendation. `tests/fixtures/owner-decision-cases.json` is the
+common Python/MCP fixture set; its `owner-decision-q.txt` is the exact regression input.
+
 Player bug reports can upload a Three Crowns save with `POST /api/upload`
 using JSON `{dataUrl: "data:application/octet-stream;base64,...", filename: "save.tc"}`.
 Saves are limited to 32 MiB. Existing image/video uploads still work. The response

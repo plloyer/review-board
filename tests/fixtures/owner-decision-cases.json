@@ -1,0 +1,91 @@
+[
+  {
+    "name": "exact q.txt",
+    "file": "owner-decision-q.txt",
+    "accepted": true
+  },
+  {
+    "name": "decimal version in explicit question",
+    "text": "Question : Autorises-tu cette relance avec Opus 5.5 ?\nOUI ou NON.\nRecommandation : OUI.\nConséquence : Une seule relance.",
+    "accepted": true
+  },
+  {
+    "name": "multi-part version and sentence boundary",
+    "text": "Le diagnostic est terminé. Autorises-tu la version 6.1.2 ?\nOUI ou NON. Je recommande OUI.",
+    "accepted": true
+  },
+  {
+    "name": "explicit recommendation",
+    "text": "Autorises-tu cette relance ?\nOUI ou NON.\nRecommandation : OUI.",
+    "accepted": true
+  },
+  {
+    "name": "Je recommande",
+    "text": "Autorises-tu cette relance ?\nOUI ou NON. Je recommande OUI.",
+    "accepted": true
+  },
+  {
+    "name": "Je conseille",
+    "text": "Autorises-tu cette relance ?\nOUI ou NON. Je conseille OUI.",
+    "accepted": true
+  },
+  {
+    "name": "one marked letter option",
+    "text": "Autorises-tu cette relance ?\nA : Faire cette relance (recommandée).\nB : Garder le pilote arrêté.",
+    "accepted": true
+  },
+  {
+    "name": "missing recommendation",
+    "text": "Autorises-tu cette relance avec Opus 5.5 ?\nOUI ou NON.",
+    "accepted": false,
+    "error": "give your recommendation"
+  },
+  {
+    "name": "unrelated recommendation word",
+    "text": "Autorises-tu cette relance ?\nOUI ou NON.\nLe réglage recommandé reste à déterminer.",
+    "accepted": false,
+    "error": "give your recommendation"
+  },
+  {
+    "name": "negated option annotation",
+    "text": "Autorises-tu cette relance ?\nOUI : Relancer (non recommandé).\nNON : Attendre.",
+    "accepted": false,
+    "error": "give your recommendation"
+  },
+  {
+    "name": "two marked options",
+    "text": "Autorises-tu cette relance ?\nOUI : Relancer (recommandé).\nNON : Attendre (recommandé).",
+    "accepted": false,
+    "error": "give your recommendation"
+  },
+  {
+    "name": "annotation only in Details",
+    "text": "Question : Autorises-tu cette relance ?\nOUI ou NON.\nConséquence : Une seule relance.\nDétails :\nOUI : Relancer (recommandé).",
+    "accepted": false,
+    "error": "give your recommendation"
+  },
+  {
+    "name": "technical progress is not an owner decision",
+    "text": "Le test 5.5 est-il terminé ?\nOUI ou NON. Je recommande OUI.",
+    "accepted": false,
+    "error": "ask one owner choice or approval"
+  },
+  {
+    "name": "two owner questions",
+    "text": "Autorises-tu Opus 5.5 ? Choisis-tu une autre carte ?\nOUI ou NON. Je recommande OUI.",
+    "accepted": false,
+    "error": "one precise owner decision"
+  },
+  {
+    "name": "bundled owner decisions",
+    "text": "Autorises-tu Opus 5.5 et choisis-tu une autre carte ?\nOUI ou NON. Je recommande OUI.",
+    "accepted": false,
+    "error": "ask one owner choice or approval"
+  },
+  {
+    "name": "missing options",
+    "text": "Autorises-tu Opus 5.5 ?\nJe recommande cette relance.",
+    "accepted": false,
+    "error": "distinct possible answers"
+  }
+]
