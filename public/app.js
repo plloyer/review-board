@@ -1772,6 +1772,10 @@ if ("serviceWorker" in navigator && window.isSecureContext) {
 }
 
 async function enableNotifications() {
+  if (window.self !== window.top) {
+    setNotifyStatus("Use the dashboard's Notifications button in the header above the board. No separate tab is needed.");
+    return;
+  }
   if (!window.isSecureContext || !("serviceWorker" in navigator) || !("PushManager" in window)) {
     setNotifyStatus("Push notifications need HTTPS — open the board through the Tailscale https:// URL, not the IP.");
     return;
