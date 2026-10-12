@@ -923,6 +923,7 @@ function compactCard(msg, blockedInfo) {
       ${view.miniThumb}
       ${view.cancelBtn}
       ${view.marker || ""}
+      ${view.cardIdentifier}
       ${view.runTime || ""}
     </div>
     ${view.blockedBadge ? `<div class="blocked-row">${view.blockedBadge}</div>` : ""}

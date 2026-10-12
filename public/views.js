@@ -521,6 +521,7 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
     const agentMark = agentMarkHTML(msg.agent);
     const tagNote = tagNoteHTML(msg.tags);
     const runTime = runTimeHTML(msg) + ExecutionView.summary(msg);
+    const cardIdentifier = `<span class="ccard-id">${esc(msg.id)}</span>`;
     // The × belongs to backlog cards only: once a card left backlog it never shows.
     const undelivered = msg.state === "backlog" && msg.direction === "human" && !msg.replyTo && !msg.lastDeliveredAt && !msg.acknowledgedAt;
     const cancelBtn = undelivered ? `<button class="cancel-sent" title="Annuler">×</button>` : "";
@@ -538,6 +539,7 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
         agentMark,
         tagNote,
         runTime,
+        cardIdentifier,
         sourceChip: core.sourceChip,
         title: questionTitle,
         miniThumb: core.miniThumbHTML,
@@ -595,6 +597,7 @@ function deriveCompactView(msg, { blockedBy = [], pendingCounts } = {}) {
       agentMark,
       tagNote,
       runTime,
+      cardIdentifier,
       sourceChip: core.sourceChip,
       title: questionTitle,
       miniThumb: core.miniThumbHTML,

@@ -10,6 +10,17 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const Views = require("../public/views");
 
+test("compact cards show their exact escaped identifier beside the time in every state", () => {
+  for (const state of ["backlog", "in_progress", "questions", "approbation", "closed"]) {
+    for (const answered of [false, true]) {
+      const card = { id: `u<123-${state}-${answered}`, state, title: "Card", direction: "human", thread: [],
+        ...(answered ? { reply: { text: "Thanks", at: "2026-10-12T12:00:00Z" } } : {}) };
+      const view = Views.deriveCompactView(card);
+      assert.equal(view.cardIdentifier, `<span class="ccard-id">u&lt;123-${state}-${answered}</span>`);
+    }
+  }
+});
+
 test("an F7 player report is an ordinary backlog feedback card: priority, comment box, archive", () => {
   const card = { id: "u-f7-view", direction: "human", kind: "message", taskKind: "feedback", title: "F7 : Court empty",
     state: "backlog", priority: 2, thread: [] };

@@ -181,6 +181,8 @@ button:hover { background: #444; }
   overflow: hidden;
 }
 /* Tags on the compact card: a dim word list at the end of the grey line, no box. */
+.ccard-id { flex-shrink: 0; align-self: flex-start; font-size: 11px; line-height: 17.5px; color: #6e7a86; font-variant-numeric: tabular-nums; }
+.ccard-id:has(+ .ccard-wait) { color: #52585f; }
 .ccard-run { flex-shrink: 0; align-self: flex-start; font-size: 11px; line-height: 17.5px; color: #6e7a86; font-variant-numeric: tabular-nums; }
 /* Time spent in the backlog: fainter than a run time, it only matters once it gets long. */
 .ccard-run.ccard-wait { color: #52585f; }
