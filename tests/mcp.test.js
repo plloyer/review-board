@@ -36,6 +36,31 @@ test("create_task files a backlog project task", async () => {
   const task = store.list().find((m) => m.id === id);
   assert.equal(task.state, "backlog");
   assert.equal(task.taskKind, "projet");
+  assert.equal(task.priority, 2);
+});
+
+test("create_task priority defaults apply through MCP without changing explicit levels or feedback", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  try {
+    for (const priority of [undefined, 0, 1, 2, 3]) {
+      const arguments_ = { title: "Project priority", taskKind: "projet" };
+      if (priority !== undefined) arguments_.priority = priority;
+      const result = await client.callTool({ name: "create_task", arguments: arguments_ });
+      assert.equal(result.isError, undefined);
+      assert.equal(store.list().find((m) => m.id === result.content[0].text).priority, priority ?? 2);
+    }
+    const feedback = await client.callTool({ name: "create_task", arguments: { title: "Player report", taskKind: "feedback" } });
+    assert.equal(store.list().find((m) => m.id === feedback.content[0].text).priority, undefined);
+    const count = store.list().length;
+    for (const priority of [null, -1, 4, 1.5, "2", true]) {
+      const result = await client.callTool({ name: "create_task", arguments: { title: "Invalid priority", priority } });
+      assert.equal(result.isError, true);
+      assert.equal(store.list().length, count);
+    }
+  } finally {
+    await client.close();
+  }
 });
 
 test("create_task accepts feedback, advertises its enum, and rejects unknown kinds", async () => {

@@ -400,6 +400,8 @@ function setPriority(id, priority, actor = "agent") {
 // `createdBy` marks the origin and `taskKind` tells it apart from filed feedback.
 function createTask({ title, context, project, blockedBy, priority, noReview, tags, taskKind = "projet" }) {
   if (!["projet", "feedback"].includes(taskKind)) throw new Error(`Invalid taskKind ${taskKind}`);
+  // Every project task must be schedulable, including direct MCP callers that omit priority.
+  if (taskKind === "projet" && priority === undefined) priority = 2;
   const id = `u${state.nextHumanId++}`;
   validatePriority(priority);
   const msg = {

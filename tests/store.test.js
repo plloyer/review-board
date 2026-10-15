@@ -404,6 +404,19 @@ test("addHumanMessage assigns state backlog + taskKind feedback, but a replyTo v
   assert.equal(vehicle.taskKind, undefined);
 });
 
+test("createTask project priority defaults persist without changing explicit levels or feedback", () => {
+  const { store } = freshStore();
+  for (const priority of [undefined, 0, 1, 2, 3]) {
+    const task = store.createTask({ title: "Project priority", priority });
+    assert.equal(task.priority, priority ?? 2);
+  }
+  const feedback = store.createTask({ title: "Player report", taskKind: "feedback" });
+  assert.equal(feedback.priority, undefined);
+  delete require.cache[require.resolve("../server/store")];
+  const reloaded = require("../server/store");
+  assert.deepEqual(reloaded.list().map((m) => m.priority), [2, 0, 1, 2, 3, undefined]);
+});
+
 test("createTask files an agent-originated project task as a human-shaped card", () => {
   const { store } = freshStore();
   const task = store.createTask({ title: "Refactor the thing", project: "review-board" });

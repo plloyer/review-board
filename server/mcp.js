@@ -434,7 +434,7 @@ function buildServer() {
     "create_task",
     {
       description:
-        "Add a card to the human's backlog. Defaults to taskKind projet; use feedback for a player's bug report, with context and optional save download link. Feedback cards, player-filed F7 reports included, start in backlog and outrank project tasks.",
+        "Add a card to the human's backlog. Defaults to taskKind projet with priority 2 when omitted; use feedback for a player's bug report, with context and optional save download link. Feedback cards, player-filed F7 reports included, start in backlog and outrank project tasks.",
       inputSchema: {
         title: z.string(),
         taskKind: z.enum(["projet", "feedback"]).optional().describe("Defaults to projet. feedback files a real feedback/retours card."),
