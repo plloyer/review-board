@@ -134,11 +134,34 @@ test("a report uploads its files, files one player card, and is found again by i
   });
 });
 
-test("intake returns a clear JSON-RPC refusal without a work tag and can retry the same report", async () => {
+test("intake classifies reports from shipped F7 clients that omit tags as Unity work", async () => {
+  await withIntake(async (base) => {
+    const context = "[three-crowns-report:shipped-client] Report from the current game";
+    const call = createCall(context);
+    delete call.params.arguments.tags;
+    const before = store.list().length;
+    const accepted = await (await post(base, "/mcp", call)).json();
+    const id = accepted.result.content[0].text;
+    const card = store.list().find((item) => item.id === id);
+    assert.deepEqual(card.tags, ["unity"]);
+    assert.equal(card.title, "[F7] The siege never ends");
+    assert.equal(card.context, context);
+    assert.equal(store.list().length, before + 1);
+    const persisted = JSON.parse(fs.readFileSync(path.join(dir, "messages.json"), "utf8"));
+    assert.deepEqual(persisted.messages.find((item) => item.id === id).tags, ["unity"]);
+    const retry = await (await post(base, "/mcp", call)).json();
+    assert.equal(retry.result.content[0].text, id);
+    assert.equal(store.list().length, before + 1);
+  });
+});
+
+test("intake refuses malformed or host-only tags without changing storage and honors client work tags", async () => {
   await withIntake(async (base) => {
     const context = "[three-crowns-report:work-tag-retry] Player report retained by the client";
     const before = store.list().length;
-    for (const tags of [undefined, [], ["linux"], "unity", [null]]) {
+    const filesBefore = fs.readdirSync(dir).sort();
+    const storageBefore = fs.readFileSync(path.join(dir, "messages.json"));
+    for (const tags of [[], ["linux"], "unity", [null], null, ["windows", "3c-unity"]]) {
       const call = createCall(context);
       call.params.arguments.tags = tags;
       const response = await post(base, "/mcp", call);
@@ -147,6 +170,8 @@ test("intake returns a clear JSON-RPC refusal without a work tag and can retry t
       assert.equal(refusal.error.code, -32602);
       assert.match(refusal.error.message, /unity, unity-free or koh2/);
       assert.equal(store.list().length, before);
+      assert.deepEqual(fs.readdirSync(dir).sort(), filesBefore);
+      assert.deepEqual(fs.readFileSync(path.join(dir, "messages.json")), storageBefore);
     }
     for (const tag of ["unity", "unity-free", "koh2"]) {
       const call = createCall(context.replace("work-tag-retry", `work-tag-retry-${tag}`));

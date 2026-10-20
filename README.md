@@ -110,11 +110,13 @@ one work classification: `unity` (needs a Unity editor/pool copy), `unity-free`
 This applies to every `taskKind`, including `feedback` and `change-request`.
 `request_change` explicitly assigns `unity-free` because it proposes board work.
 Existing cards are unchanged; `move_task` can still replace or clear their tags.
-The public F7 intake accepts the same work tags and returns a JSON-RPC `-32602`
-error naming the choices when none is supplied. F7 clients without tags cannot
-file new cards until updated: the current game client shows delivery failure and
-retains its report and full refusal on disk for retry. Replays of an existing report marker still
-return its original card, including legacy untagged cards.
+The public F7 intake accepts the same work tags. Shipped game clients omit `tags`,
+so the intake explicitly classifies those reports as `unity`: a player's in-game
+bug is fixed in the Unity project. Client-supplied work tags take precedence.
+Malformed tags, empty arrays and host-only tags return a JSON-RPC `-32602` error
+naming the choices, without changing storage. Direct MCP `create_task` still
+requires a work tag. Replays of an existing report marker still return its
+original card, including legacy untagged cards.
 The HTTP MCP endpoints are `/mcp` and `/mcp-live`;
 there is no separate REST create-task endpoint. Omitting `taskKind` still creates
 a `projet` card, and the first MCP result block remains the bare card id.

@@ -19,6 +19,8 @@ const { storeUpload } = require("./web");
 const KEY_HEADER = "x-intake-key";
 const MARKER = /^\[three-crowns-report:[A-Za-z0-9-]{1,64}\]$/;
 const PROJECT = "Three Crowns · player report";
+// Shipped F7 clients omit tags; a player's in-game bug is fixed in the Unity project.
+const LEGACY_F7_WORK_TAG = "unity";
 const MAX_TITLE = 200;
 const MAX_CONTEXT = 64 * 1024;
 
@@ -112,7 +114,7 @@ function createIntakeApp({
           context,
           project: PROJECT,
           taskKind: "feedback",
-          tags,
+          tags: tags === undefined ? [LEGACY_F7_WORK_TAG] : tags,
         });
       } catch (error) {
         // The F7 client surfaces delivery failure and keeps the refusal/report on disk.
