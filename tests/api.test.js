@@ -350,7 +350,7 @@ test("POST /api/messages/:id/reopen sends a closed card back to backlog with the
     });
     assert.equal(unknown.status, 404);
 
-    const task = store.createTask({ title: "Do the thing" });
+    const task = store.createTask({ tags: ["unity-free"], title: "Do the thing" });
     store.moveTask(task.id, "closed");
     const res = await fetch(`${base}/api/messages/${task.id}/reopen`, {
       method: "POST",
@@ -366,7 +366,7 @@ test("POST /api/messages/:id/reopen sends a closed card back to backlog with the
 
 test("POST /api/messages/:id/priority sets 0-3, rejects a bad value without changing the stored priority, 404s on unknown id", async () => {
   await withServer(async (base) => {
-    const task = store.createTask({ title: "Triage me" });
+    const task = store.createTask({ tags: ["unity-free"], title: "Triage me" });
 
     for (const p of [0, 1, 2, 3]) {
       const res = await fetch(`${base}/api/messages/${task.id}/priority`, {
@@ -598,7 +598,7 @@ for (const endpoint of ["/mcp", "/mcp-live"]) {
       await client.connect(new StreamableHTTPClientTransport(new URL(endpoint, base)));
       try {
         const context = "Loading day 42 crashes. [Save](/api/file?path=example.tc)";
-        const result = await client.callTool({ name: "create_task", arguments: { title: "Player bug", context, taskKind: "feedback" } });
+        const result = await client.callTool({ name: "create_task", arguments: { tags: ["unity-free"], title: "Player bug", context, taskKind: "feedback" } });
         assert.notEqual(result.isError, true, result.content[0].text);
         const cards = await (await fetch(`${base}/api/reviews`)).json();
         const card = cards.find((m) => m.id === result.content[0].text);
@@ -606,10 +606,10 @@ for (const endpoint of ["/mcp", "/mcp-live"]) {
         assert.equal(card.state, "backlog");
         assert.equal(card.direction, "human");
         assert.equal(card.context, context);
-        const project = await client.callTool({ name: "create_task", arguments: { title: "Default project" } });
+        const project = await client.callTool({ name: "create_task", arguments: { tags: ["unity-free"], title: "Default project" } });
         assert.equal(store.list().find((m) => m.id === project.content[0].text).taskKind, "projet");
         const count = store.list().length;
-        const invalid = await client.callTool({ name: "create_task", arguments: { title: "Invalid", taskKind: "unknown" } });
+        const invalid = await client.callTool({ name: "create_task", arguments: { tags: ["unity-free"], title: "Invalid", taskKind: "unknown" } });
         assert.equal(invalid.isError, true);
         assert.equal(store.list().length, count);
       } finally {

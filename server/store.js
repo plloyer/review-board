@@ -319,8 +319,8 @@ function addHumanMessage(text, images, replyTo) {
 
 const PRIORITIES = [0, 1, 2, 3];
 
-// Tags say who CAN take a card (windows / mac / linux / unity / a machine
-// name); no tag = anyone. Lowercased, deduped; an empty result clears them.
+// Tags classify work and constrain hosts. Lowercased, deduped; an empty result
+// clears them on existing cards. New tasks must explicitly classify their work.
 function normalizeTags(tags) {
   const out = [...new Set((tags || []).map((t) => String(t).trim().toLowerCase()).filter(Boolean))];
   return out.length ? out : undefined;
@@ -399,7 +399,11 @@ function setPriority(id, priority, actor = "agent") {
 // (agentReply, humanThreadNote, markThreadSeen, archive) works on it unmodified;
 // `createdBy` marks the origin and `taskKind` tells it apart from filed feedback.
 function createTask({ title, context, project, blockedBy, priority, noReview, tags, taskKind = "projet" }) {
-  if (!["projet", "feedback"].includes(taskKind)) throw new Error(`Invalid taskKind ${taskKind}`);
+  if (!["projet", "feedback", "change-request"].includes(taskKind)) throw new Error(`Invalid taskKind ${taskKind}`);
+  const normalizedTags = normalizeTags(tags);
+  if (!normalizedTags?.some((tag) => ["unity", "unity-free", "koh2"].includes(tag))) {
+    throw new Error("Work tag required: choose unity, unity-free or koh2");
+  }
   // Every project task must be schedulable, including direct MCP callers that omit priority.
   if (taskKind === "projet" && priority === undefined) priority = 2;
   const id = `u${state.nextHumanId++}`;
@@ -422,8 +426,7 @@ function createTask({ title, context, project, blockedBy, priority, noReview, ta
   };
   if (blockedBy && blockedBy.length) msg.blockedBy = assignBlockers(id, blockedBy);
   if (priority !== undefined) msg.priority = priority;
-  const normalizedTags = normalizeTags(tags);
-  if (normalizedTags) msg.tags = normalizedTags;
+  msg.tags = normalizedTags;
   // Opt-out, at creation: some tasks legitimately never need his review before
   // landing/closing (see agentMoveNeedsApproval) — still an ordinary visible card.
   if (noReview) msg.noReview = true;
@@ -437,27 +440,8 @@ function createTask({ title, context, project, blockedBy, priority, noReview, ta
 // human-shaped card so it rides the same thread/seen/archive machinery as any
 // other card — never built by the agent, only proposed for the human to action.
 function createChangeRequest({ title, details }) {
-  const id = `u${state.nextHumanId++}`;
-  const msg = {
-    id,
-    direction: "human",
-    kind: "message",
-    title,
-    context: details || "",
-    project: "",
-    images: [],
-    replyTo: null,
-    createdBy: "agent",
-    taskKind: "change-request",
-    state: "backlog",
-    thread: [],
-    status: "open",
-    createdAt: new Date().toISOString(),
-  };
-  state.messages.push(msg);
-  save(state);
-  emitChange();
-  return msg;
+  // This tool proposes changes to the board itself, which needs no Unity editor.
+  return createTask({ title, context: details, taskKind: "change-request", tags: ["unity-free"] });
 }
 
 // Moves a task/card to a new kanban state, optionally dropping a thread note

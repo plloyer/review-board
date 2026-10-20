@@ -35,7 +35,7 @@ const post = (base, route, body, key = KEY) => fetch(base + route, {
 const get = (base, route, key = KEY) => fetch(base + route, { headers: key === null ? {} : { "X-Intake-Key": key } });
 const createCall = (context, title = "F7 : The siege never ends") => ({
   jsonrpc: "2.0", id: 1, method: "tools/call",
-  params: { name: "create_task", arguments: { title, taskKind: "feedback", context, project: "Three Crowns · player report" } },
+  params: { name: "create_task", arguments: { tags: ["unity"], title, taskKind: "feedback", context, project: "Three Crowns · player report" } },
 });
 
 test("a missing or wrong key is refused before anything else", async () => {
@@ -49,7 +49,7 @@ test("a missing or wrong key is refused before anything else", async () => {
 });
 
 test("no board route other than the intake is reachable", async () => {
-  store.createTask({ title: "private card", context: "secret plans" });
+  store.createTask({ tags: ["unity-free"], title: "private card", context: "secret plans" });
   await withIntake(async (base) => {
     for (const route of ["/", "/index.html", "/api/events", "/api/event-journal?after=0", "/api/file?path=x",
       "/api/image?path=x", "/api/build-id", "/api/push-public-key", "/shared/views.js"])
@@ -102,6 +102,7 @@ test("a report uploads its files, files one player card, and is found again by i
     const id = created.result.content[0].text;
     const card = store.list().find((c) => c.id === id);
     assert.equal(card.taskKind, "feedback");
+    assert.deepEqual(card.tags, ["unity"]);
     assert.equal(card.project, "Three Crowns · player report");
     assert.equal(card.state, "backlog", "a player card lands on the board at once, no intake approval");
     assert.equal(card.reportApproval, undefined);
@@ -130,6 +131,49 @@ test("a report uploads its files, files one player card, and is found again by i
     assert.equal(legacyCard.state, "backlog");
     const current = await (await post(base, "/mcp", createCall(`[three-crowns-report:current] x`, "[F7] New client"))).json();
     assert.equal(store.list().find((c) => c.id === current.result.content[0].text).title, "[F7] New client", "the prefix is never doubled");
+  });
+});
+
+test("intake returns a clear JSON-RPC refusal without a work tag and can retry the same report", async () => {
+  await withIntake(async (base) => {
+    const context = "[three-crowns-report:work-tag-retry] Player report retained by the client";
+    const before = store.list().length;
+    for (const tags of [undefined, [], ["linux"], "unity", [null]]) {
+      const call = createCall(context);
+      call.params.arguments.tags = tags;
+      const response = await post(base, "/mcp", call);
+      assert.equal(response.status, 200);
+      const refusal = await response.json();
+      assert.equal(refusal.error.code, -32602);
+      assert.match(refusal.error.message, /unity, unity-free or koh2/);
+      assert.equal(store.list().length, before);
+    }
+    for (const tag of ["unity", "unity-free", "koh2"]) {
+      const call = createCall(context.replace("work-tag-retry", `work-tag-retry-${tag}`));
+      call.params.arguments.tags = [` ${tag.toUpperCase()} `];
+      const accepted = await (await post(base, "/mcp", call)).json();
+      const card = store.list().find((card) => card.id === accepted.result.content[0].text);
+      assert.deepEqual(card.tags, [tag]);
+      assert.equal(card.context, call.params.arguments.context);
+      // Lost-response retries still recover an existing card even from an older client.
+      delete call.params.arguments.tags;
+      const retry = await (await post(base, "/mcp", call)).json();
+      assert.equal(retry.result.content[0].text, card.id);
+    }
+    assert.equal(store.list().length, before + 3);
+  });
+});
+
+test("intake replays an untagged legacy card without changing its classification", async () => {
+  const context = "[three-crowns-report:legacy-work-tag] Older report";
+  const card = store.addHumanMessage(context, []);
+  assert.equal(card.tags, undefined);
+  await withIntake(async (base) => {
+    const call = createCall(context);
+    delete call.params.arguments.tags;
+    const replay = await (await post(base, "/mcp", call)).json();
+    assert.equal(replay.result.content[0].text, card.id);
+    assert.equal(store.list().find((item) => item.id === card.id).tags, undefined);
   });
 });
 

@@ -66,7 +66,7 @@ test("long poll wakes on a committed PL reply, replays suffix, and cleans listen
 
 test("remote completion HTTP retries return one durable event, reject mismatch and malformed", async () => {
   await serverTest(async base => {
-    const card = store.createTask({ title: "test", noReview: true });
+    const card = store.createTask({ tags: ["unity-free"], title: "test", noReview: true });
     const event = completion(card.id);
     const post = payload => fetch(`${base}/api/events/completion`, { method: "POST",
       headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
@@ -85,7 +85,7 @@ test("remote completion HTTP retries return one durable event, reject mismatch a
 
 test("agent-created task emits an agent event and thread delivery vehicles stay distinguishable", () => {
   const after = store.replayEvents(0).sequence;
-  const card = store.createTask({ title: "new" });
+  const card = store.createTask({ tags: ["unity-free"], title: "new" });
   store.addHumanMessage("reply", [], card.id);
   assert.deepEqual(store.replayEvents(after).events.map(event => [event.cardId, event.kind, event.author]),
     [[card.id, "created", "agent"], [card.id, "delivery", "human"]]);

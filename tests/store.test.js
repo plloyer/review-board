@@ -17,15 +17,60 @@ function freshStore() {
   return { store: require("../server/store"), dir };
 }
 
+test("createTask requires an explicit work tag for every task kind before any mutation", () => {
+  const { store, dir } = freshStore();
+  for (const taskKind of [undefined, "projet", "feedback", "change-request"]) {
+    for (const tags of [undefined, [], ["linux", "3c-unity"], [" ", "unknown"]]) {
+      assert.throws(() => store.createTask({ title: "Unclassified", taskKind, tags }),
+        /^Error: Work tag required: choose unity, unity-free or koh2$/);
+      assert.deepEqual(store.list(), []);
+      assert.equal(fs.existsSync(path.join(dir, "messages.json")), false);
+    }
+  }
+  assert.equal(store.createTask({ title: "First accepted", tags: ["unity"] }).id, "u1");
+});
+
+test("createTask accepts each normalized work tag for every task kind and persists it", () => {
+  const { store, dir } = freshStore();
+  for (const taskKind of [undefined, "projet", "feedback", "change-request"]) {
+    for (const tag of ["unity", "unity-free", "koh2"]) {
+      const card = store.createTask({ title: "Classified", taskKind, tags: ["linux", ` ${tag.toUpperCase()} `, tag] });
+      assert.equal(card.taskKind, taskKind ?? "projet");
+      assert.deepEqual(card.tags, ["linux", tag]);
+    }
+  }
+  const saved = JSON.parse(fs.readFileSync(path.join(dir, "messages.json"), "utf8"));
+  assert.deepEqual(saved.messages.map((card) => card.tags), store.list().map((card) => card.tags));
+});
+
+test("legacy unclassified cards load unchanged and can still replace or clear tags", () => {
+  const { dir } = freshStore();
+  const legacy = { id: "u1", direction: "human", kind: "message", taskKind: "projet",
+    title: "Legacy", state: "backlog", status: "open", thread: [] };
+  const archived = { ...legacy, id: "u2", state: "closed", tags: ["linux"] };
+  fs.writeFileSync(path.join(dir, "messages.json"), JSON.stringify({
+    nextHumanId: 3, nextAgentId: 1, messages: [legacy], history: [archived], pendingUnblockNotices: [],
+  }));
+  delete require.cache[require.resolve("../server/store")];
+  const store = require("../server/store");
+  assert.deepEqual(store.list(), [legacy]);
+  assert.deepEqual(store.history(), [archived]);
+  store.moveTask("u1", "backlog", null, { actor: "agent", tags: ["linux"] });
+  assert.deepEqual(store.list()[0].tags, ["linux"]);
+  store.moveTask("u1", "backlog", null, { actor: "agent", tags: [] });
+  assert.equal(store.list()[0].tags, undefined);
+  assert.deepEqual(store.history(), [archived]);
+});
+
 test("createTask feedback shares the human-feedback shape and is deliverable; invalid kinds create nothing", () => {
   const { store } = freshStore();
   const own = store.addHumanMessage("PL feedback", []);
   const context = "Player crash. [Save](/api/file?path=save.tc)";
-  const task = store.createTask({ title: "Player feedback", context, taskKind: "feedback", project: "Three Crowns" });
+  const task = store.createTask({ tags: ["unity-free"], title: "Player feedback", context, taskKind: "feedback", project: "Three Crowns" });
   for (const key of ["taskKind", "direction", "kind", "state", "status", "replyTo"]) assert.equal(task[key], own[key], key);
   assert.equal(task.context, context);
   assert.ok(store.peekDeliverable().some((m) => m.id === task.id));
-  assert.throws(() => store.createTask({ title: "Invalid", taskKind: "unknown" }), /Invalid taskKind/);
+  assert.throws(() => store.createTask({ tags: ["unity-free"], title: "Invalid", taskKind: "unknown" }), /Invalid taskKind/);
   assert.equal(store.list().length, 2);
 });
 
@@ -407,10 +452,10 @@ test("addHumanMessage assigns state backlog + taskKind feedback, but a replyTo v
 test("createTask project priority defaults persist without changing explicit levels or feedback", () => {
   const { store } = freshStore();
   for (const priority of [undefined, 0, 1, 2, 3]) {
-    const task = store.createTask({ title: "Project priority", priority });
+    const task = store.createTask({ tags: ["unity-free"], title: "Project priority", priority });
     assert.equal(task.priority, priority ?? 2);
   }
-  const feedback = store.createTask({ title: "Player report", taskKind: "feedback" });
+  const feedback = store.createTask({ tags: ["unity-free"], title: "Player report", taskKind: "feedback" });
   assert.equal(feedback.priority, undefined);
   delete require.cache[require.resolve("../server/store")];
   const reloaded = require("../server/store");
@@ -419,7 +464,7 @@ test("createTask project priority defaults persist without changing explicit lev
 
 test("createTask files an agent-originated project task as a human-shaped card", () => {
   const { store } = freshStore();
-  const task = store.createTask({ title: "Refactor the thing", project: "review-board" });
+  const task = store.createTask({ tags: ["unity-free"], title: "Refactor the thing", project: "review-board" });
   assert.ok(task.id.startsWith("u"));
   assert.equal(task.direction, "human");
   assert.equal(task.createdBy, "agent");
@@ -445,7 +490,7 @@ test("reply() moves the card per decision: approved -> landing, otherwise in_pro
 
 test("moveTask validates the state, moves the card, and optionally drops a thread note", () => {
   const { store } = freshStore();
-  const task = store.createTask({ title: "Do the thing" });
+  const task = store.createTask({ tags: ["unity-free"], title: "Do the thing" });
   const moved = store.moveTask(task.id, "in_progress", "started working on it");
   assert.equal(moved.state, "in_progress");
   assert.equal(moved.thread.length, 1);
@@ -455,7 +500,7 @@ test("moveTask validates the state, moves the card, and optionally drops a threa
 
 test("moveTask stamps startedAt on entry into in_progress only, so the card shows how long it has run", () => {
   const { store } = freshStore();
-  const task = store.createTask({ title: "Do the thing" });
+  const task = store.createTask({ tags: ["unity-free"], title: "Do the thing" });
   assert.equal(task.startedAt, undefined);
   const first = store.moveTask(task.id, "in_progress").startedAt;
   assert.ok(first);
@@ -466,7 +511,7 @@ test("moveTask stamps startedAt on entry into in_progress only, so the card show
 
 test("moveTask stamps stateSince when the state changes, not on a re-move", () => {
   const { store } = freshStore();
-  const task = store.createTask({ title: "Do the thing" });
+  const task = store.createTask({ tags: ["unity-free"], title: "Do the thing" });
   assert.equal(task.stateSince, undefined, "a new backlog card is timed from createdAt");
   const entered = store.moveTask(task.id, "in_progress").stateSince;
   assert.ok(entered);
@@ -475,7 +520,7 @@ test("moveTask stamps stateSince when the state changes, not on a re-move", () =
 
 test("moveTask throws on an unknown id or an unknown state", () => {
   const { store } = freshStore();
-  const task = store.createTask({ title: "Do the thing" });
+  const task = store.createTask({ tags: ["unity-free"], title: "Do the thing" });
   assert.throws(() => store.moveTask("u999", "in_progress"));
   assert.throws(() => store.moveTask(task.id, "not-a-real-state"));
 });
@@ -555,7 +600,7 @@ test("moveTask leaves status/acknowledgedAt alone when the target isn't question
   const moved2 = store.moveTask(a2.id, "questions", QUESTION);
   assert.equal(moved2.status, "open");
 
-  const human = store.createTask({ title: "A human-shaped task" });
+  const human = store.createTask({ tags: ["unity-free"], title: "A human-shaped task" });
   const moved3 = store.moveTask(human.id, "questions", QUESTION); // direction human, guard must not apply
   assert.equal(moved3.direction, "human");
   assert.equal(moved3.status, "open");
@@ -603,24 +648,24 @@ test("migration assigns state to stateless data loaded from disk: human question
 
 test("setBlockers rejects an unknown blocker id and self-reference", () => {
   const { store } = freshStore();
-  const a = store.createTask({ title: "A" });
+  const a = store.createTask({ tags: ["unity-free"], title: "A" });
   assert.throws(() => store.setBlockers(a.id, ["u999"]), /No message/);
   assert.throws(() => store.setBlockers(a.id, [a.id]), /cannot block itself/);
 });
 
 test("setBlockers rejects a direct cycle (A blocked by B, B blocked by A)", () => {
   const { store } = freshStore();
-  const a = store.createTask({ title: "A" });
-  const b = store.createTask({ title: "B" });
+  const a = store.createTask({ tags: ["unity-free"], title: "A" });
+  const b = store.createTask({ tags: ["unity-free"], title: "B" });
   store.setBlockers(a.id, [b.id]);
   assert.throws(() => store.setBlockers(b.id, [a.id]), /cycle/);
 });
 
 test("setBlockers rejects a chain cycle (A -> B -> C -> A)", () => {
   const { store } = freshStore();
-  const a = store.createTask({ title: "A" });
-  const b = store.createTask({ title: "B" });
-  const c = store.createTask({ title: "C" });
+  const a = store.createTask({ tags: ["unity-free"], title: "A" });
+  const b = store.createTask({ tags: ["unity-free"], title: "B" });
+  const c = store.createTask({ tags: ["unity-free"], title: "C" });
   store.setBlockers(b.id, [a.id]);
   store.setBlockers(c.id, [b.id]);
   assert.throws(() => store.setBlockers(a.id, [c.id]), /cycle/);
@@ -628,9 +673,9 @@ test("setBlockers rejects a chain cycle (A -> B -> C -> A)", () => {
 
 test("setBlockers replaces the list; empty list unblocks", () => {
   const { store } = freshStore();
-  const a = store.createTask({ title: "A" });
-  const b = store.createTask({ title: "B" });
-  const c = store.createTask({ title: "C" });
+  const a = store.createTask({ tags: ["unity-free"], title: "A" });
+  const b = store.createTask({ tags: ["unity-free"], title: "B" });
+  const c = store.createTask({ tags: ["unity-free"], title: "C" });
   store.setBlockers(a.id, [b.id, c.id]);
   assert.deepEqual(store.list().find((m) => m.id === a.id).blockedBy, [b.id, c.id]);
   store.setBlockers(a.id, []);
@@ -639,19 +684,19 @@ test("setBlockers replaces the list; empty list unblocks", () => {
 
 test("createTask and moveTask accept blockedBy", () => {
   const { store } = freshStore();
-  const b = store.createTask({ title: "B" });
-  const a = store.createTask({ title: "A", blockedBy: [b.id] });
+  const b = store.createTask({ tags: ["unity-free"], title: "B" });
+  const a = store.createTask({ tags: ["unity-free"], title: "A", blockedBy: [b.id] });
   assert.deepEqual(a.blockedBy, [b.id]);
 
-  const c = store.createTask({ title: "C" });
+  const c = store.createTask({ tags: ["unity-free"], title: "C" });
   const moved = store.moveTask(a.id, "in_progress", null, { blockedBy: [b.id, c.id] });
   assert.deepEqual(moved.blockedBy, [b.id, c.id]);
 });
 
 test("moveTask into landing/closed queues a one-shot unblock notice for a dependent that becomes fully unblocked", () => {
   const { store } = freshStore();
-  const blocker = store.createTask({ title: "Blocker" });
-  const dependent = store.createTask({ title: "Dependent", blockedBy: [blocker.id] });
+  const blocker = store.createTask({ tags: ["unity-free"], title: "Blocker" });
+  const dependent = store.createTask({ tags: ["unity-free"], title: "Dependent", blockedBy: [blocker.id] });
   // A fresh task is itself already deliverable (open, unacknowledged); ack it so the
   // synthetic notice below isn't masked by peekDeliverable's own-content-wins dedup.
   store.acknowledge([dependent.id]);
@@ -671,8 +716,8 @@ test("moveTask into landing/closed queues a one-shot unblock notice for a depend
 
 test("unblock notice is not queued again on a no-op re-move once already resolved", () => {
   const { store } = freshStore();
-  const blocker = store.createTask({ title: "Blocker" });
-  const dependent = store.createTask({ title: "Dependent", blockedBy: [blocker.id] });
+  const blocker = store.createTask({ tags: ["unity-free"], title: "Blocker" });
+  const dependent = store.createTask({ tags: ["unity-free"], title: "Dependent", blockedBy: [blocker.id] });
   store.moveTask(blocker.id, "closed");
   store.acknowledge([dependent.id]);
   store.moveTask(blocker.id, "closed", "re-closed, no-op"); // same state again
@@ -681,8 +726,8 @@ test("unblock notice is not queued again on a no-op re-move once already resolve
 
 test("pendingUnblockNotices survives a save/reload round-trip", () => {
   const { store, dir } = freshStore();
-  const blocker = store.createTask({ title: "Blocker" });
-  const dependent = store.createTask({ title: "Dependent", blockedBy: [blocker.id] });
+  const blocker = store.createTask({ tags: ["unity-free"], title: "Blocker" });
+  const dependent = store.createTask({ tags: ["unity-free"], title: "Dependent", blockedBy: [blocker.id] });
   store.acknowledge([dependent.id]); // see comment above: avoid the own-content dedup masking the notice
   store.moveTask(blocker.id, "closed");
 
@@ -696,7 +741,7 @@ test("pendingUnblockNotices survives a save/reload round-trip", () => {
 test("reply() approving a review card also queues unblock notices (landing reached without moveTask)", () => {
   const { store } = freshStore();
   const blocker = store.addAgentMessage({ title: "Review this", kind: "review" });
-  const dependent = store.createTask({ title: "Dependent", blockedBy: [blocker.id] });
+  const dependent = store.createTask({ tags: ["unity-free"], title: "Dependent", blockedBy: [blocker.id] });
   store.acknowledge([dependent.id]); // see comment above: avoid the own-content dedup masking the notice
   store.reply(blocker.id, { text: "ok", decision: "approved" }); // -> landing
   assert.ok(store.peekDeliverable().some((m) => m.id === dependent.id && m.unblockNotice));
@@ -706,8 +751,8 @@ test("reply() approving a review card also queues unblock notices (landing reach
 
 test("withdraw of an active blocker queues an unblock notice for its now-unblocked dependent", () => {
   const { store } = freshStore();
-  const blocker = store.createTask({ title: "Blocker" });
-  const dependent = store.createTask({ title: "Dependent", blockedBy: [blocker.id] });
+  const blocker = store.createTask({ tags: ["unity-free"], title: "Blocker" });
+  const dependent = store.createTask({ tags: ["unity-free"], title: "Dependent", blockedBy: [blocker.id] });
   // A fresh task is itself already deliverable (open, unacknowledged); ack it so the
   // synthetic notice below isn't masked by peekDeliverable's own-content-wins dedup.
   store.acknowledge([dependent.id]);
@@ -717,8 +762,8 @@ test("withdraw of an active blocker queues an unblock notice for its now-unblock
 
 test("archive of an active blocker queues an unblock notice for its now-unblocked dependent", () => {
   const { store } = freshStore();
-  const blocker = store.createTask({ title: "Blocker" });
-  const dependent = store.createTask({ title: "Dependent", blockedBy: [blocker.id] });
+  const blocker = store.createTask({ tags: ["unity-free"], title: "Blocker" });
+  const dependent = store.createTask({ tags: ["unity-free"], title: "Dependent", blockedBy: [blocker.id] });
   store.acknowledge([dependent.id]); // see comment above
   store.archive(blocker.id);
   assert.ok(store.peekDeliverable().some((m) => m.id === dependent.id && m.unblockNotice));
@@ -726,8 +771,8 @@ test("archive of an active blocker queues an unblock notice for its now-unblocke
 
 test("withdraw of a dependent prunes its own now-moot pending unblock notice", () => {
   const { store } = freshStore();
-  const blocker = store.createTask({ title: "Blocker" });
-  const dependent = store.createTask({ title: "Dependent", blockedBy: [blocker.id] });
+  const blocker = store.createTask({ tags: ["unity-free"], title: "Blocker" });
+  const dependent = store.createTask({ tags: ["unity-free"], title: "Dependent", blockedBy: [blocker.id] });
   store.acknowledge([dependent.id]); // see comment above
   store.moveTask(blocker.id, "closed"); // queues a notice for dependent
   assert.ok(store.peekDeliverable().some((m) => m.id === dependent.id && m.unblockNotice));
@@ -737,8 +782,8 @@ test("withdraw of a dependent prunes its own now-moot pending unblock notice", (
 
 test("archive of a dependent prunes its own now-moot pending unblock notice", () => {
   const { store } = freshStore();
-  const blocker = store.createTask({ title: "Blocker" });
-  const dependent = store.createTask({ title: "Dependent", blockedBy: [blocker.id] });
+  const blocker = store.createTask({ tags: ["unity-free"], title: "Blocker" });
+  const dependent = store.createTask({ tags: ["unity-free"], title: "Dependent", blockedBy: [blocker.id] });
   store.acknowledge([dependent.id]); // see comment above
   store.moveTask(blocker.id, "closed");
   assert.ok(store.peekDeliverable().some((m) => m.id === dependent.id && m.unblockNotice));
@@ -748,20 +793,20 @@ test("archive of a dependent prunes its own now-moot pending unblock notice", ()
 
 test("setBlockers re-blocking a card prunes its stale pending unblock notice", () => {
   const { store } = freshStore();
-  const blocker = store.createTask({ title: "Blocker" });
-  const dependent = store.createTask({ title: "Dependent", blockedBy: [blocker.id] });
+  const blocker = store.createTask({ tags: ["unity-free"], title: "Blocker" });
+  const dependent = store.createTask({ tags: ["unity-free"], title: "Dependent", blockedBy: [blocker.id] });
   store.acknowledge([dependent.id]); // see comment above
   store.moveTask(blocker.id, "closed"); // queues a notice for dependent
   assert.ok(store.peekDeliverable().some((m) => m.id === dependent.id && m.unblockNotice));
-  const newBlocker = store.createTask({ title: "New blocker" });
+  const newBlocker = store.createTask({ tags: ["unity-free"], title: "New blocker" });
   store.setBlockers(dependent.id, [newBlocker.id]); // blocked again
   assert.equal(store.peekDeliverable().some((m) => m.id === dependent.id && m.unblockNotice), false);
 });
 
 test("setBlockers unblocking (empty list) leaves an existing pending unblock notice alone — it's still accurate", () => {
   const { store } = freshStore();
-  const blocker = store.createTask({ title: "Blocker" });
-  const dependent = store.createTask({ title: "Dependent", blockedBy: [blocker.id] });
+  const blocker = store.createTask({ tags: ["unity-free"], title: "Blocker" });
+  const dependent = store.createTask({ tags: ["unity-free"], title: "Dependent", blockedBy: [blocker.id] });
   store.acknowledge([dependent.id]); // see comment above
   store.moveTask(blocker.id, "closed");
   assert.ok(store.peekDeliverable().some((m) => m.id === dependent.id && m.unblockNotice));
@@ -786,7 +831,7 @@ test("peekDeliverable drops a pending unblock notice when that same id is indepe
 
 test("setPriority sets/validates priority", () => {
   const { store } = freshStore();
-  const a = store.createTask({ title: "A" });
+  const a = store.createTask({ tags: ["unity-free"], title: "A" });
   store.setPriority(a.id, 1);
   assert.equal(store.list().find((m) => m.id === a.id).priority, 1);
   assert.throws(() => store.setPriority(a.id, 4));
@@ -794,7 +839,7 @@ test("setPriority sets/validates priority", () => {
 
 test("setPriority accepts 0 (P0/critical, above 1) and still rejects out-of-range values", () => {
   const { store } = freshStore();
-  const a = store.createTask({ title: "A" });
+  const a = store.createTask({ tags: ["unity-free"], title: "A" });
   store.setPriority(a.id, 0);
   assert.equal(store.list().find((m) => m.id === a.id).priority, 0);
   assert.throws(() => store.setPriority(a.id, 4));
@@ -803,16 +848,16 @@ test("setPriority accepts 0 (P0/critical, above 1) and still rejects out-of-rang
 
 test("createTask/moveTask accept priority", () => {
   const { store } = freshStore();
-  const a = store.createTask({ title: "A", priority: 1 });
+  const a = store.createTask({ tags: ["unity-free"], title: "A", priority: 1 });
   assert.equal(a.priority, 1);
   const moved = store.moveTask(a.id, "in_progress", null, { priority: 3 });
   assert.equal(moved.priority, 3);
-  assert.throws(() => store.createTask({ title: "B", priority: 9 }));
+  assert.throws(() => store.createTask({ tags: ["unity-free"], title: "B", priority: 9 }));
 });
 
 test("createTask accepts priority 0 and it persists as a real (non-falsy) stored value", () => {
   const { store } = freshStore();
-  const a = store.createTask({ title: "A", priority: 0 });
+  const a = store.createTask({ tags: ["unity-free"], title: "A", priority: 0 });
   assert.equal(a.priority, 0);
   assert.equal(store.list().find((m) => m.id === a.id).priority, 0);
 });
@@ -822,6 +867,7 @@ test("createTask accepts priority 0 and it persists as a real (non-falsy) stored
 test("createChangeRequest files a backlog card with taskKind change-request and context = details", () => {
   const { store } = freshStore();
   const cr = store.createChangeRequest({ title: "Add a snooze button", details: "so I can defer a card" });
+  assert.deepEqual(cr.tags, ["unity-free"]);
   assert.equal(cr.direction, "human");
   assert.equal(cr.taskKind, "change-request");
   assert.equal(cr.state, "backlog");
@@ -832,7 +878,7 @@ test("createChangeRequest files a backlog card with taskKind change-request and 
 
 test("moveTask(actor 'agent') refuses landing/closed on a normal card, with an instructive error, leaving state untouched", () => {
   const { store } = freshStore();
-  const task = store.createTask({ title: "Do the thing" });
+  const task = store.createTask({ tags: ["unity-free"], title: "Do the thing" });
   store.moveTask(task.id, "in_progress");
   assert.throws(
     () => store.moveTask(task.id, "landing", null, { actor: "agent" }),
@@ -843,7 +889,7 @@ test("moveTask(actor 'agent') refuses landing/closed on a normal card, with an i
 
 test("moveTask(actor 'agent') to a non-landing/closed state requires the agent declaration and a real owner question", () => {
   const { store } = freshStore();
-  const task = store.createTask({ title: "Do the thing" });
+  const task = store.createTask({ tags: ["unity-free"], title: "Do the thing" });
   const moved = store.moveTask(task.id, "in_progress", null, { actor: "agent", agent: AGENT });
   assert.equal(moved.state, "in_progress");
   assert.equal(store.moveTask(task.id, "questions", QUESTION, { actor: "agent" }).state, "questions", QUESTION);
@@ -851,7 +897,7 @@ test("moveTask(actor 'agent') to a non-landing/closed state requires the agent d
 
 test("moveTask(actor 'agent') into in_progress needs an agent declaration unless the card already carries one", () => {
   const { store } = freshStore();
-  const task = store.createTask({ title: "Do the thing" });
+  const task = store.createTask({ tags: ["unity-free"], title: "Do the thing" });
   assert.throws(() => store.moveTask(task.id, "in_progress", null, { actor: "agent" }), /agent: \{vendor: "claude"\|"codex"\|"antigravity"/);
   assert.equal(store.list().find((m) => m.id === task.id).state, "backlog", "refused move must leave state untouched");
   store.moveTask(task.id, "in_progress", null, { actor: "agent", agent: AGENT });
@@ -859,13 +905,13 @@ test("moveTask(actor 'agent') into in_progress needs an agent declaration unless
   // Re-entry after the human refused: the declaration is already on the card.
   assert.equal(store.moveTask(task.id, "in_progress", null, { actor: "agent" }).state, "in_progress");
   // The human's own moves are never gated.
-  const other = store.createTask({ title: "Other" });
+  const other = store.createTask({ tags: ["unity-free"], title: "Other" });
   assert.equal(store.moveTask(other.id, "in_progress").state, "in_progress");
 });
 
 test("moveTask default actor ('human', e.g. the web route) is never gated", () => {
   const { store } = freshStore();
-  const task = store.createTask({ title: "Do the thing" });
+  const task = store.createTask({ tags: ["unity-free"], title: "Do the thing" });
   const moved = store.moveTask(task.id, "landing");
   assert.equal(moved.state, "landing");
 });
@@ -891,21 +937,21 @@ test("moveTask(actor 'agent') to closed refuses with no retro, even once approve
 
 test("moveTask(actor 'agent') to closed refuses with no retro even for a no_review task (the retro is about the work, not the review)", () => {
   const { store } = freshStore();
-  const task = store.createTask({ title: "Trivial task", noReview: true });
+  const task = store.createTask({ tags: ["unity-free"], title: "Trivial task", noReview: true });
   store.moveTask(task.id, "in_progress");
   assert.throws(() => store.moveTask(task.id, "closed", null, { actor: "agent" }), /retrospective/);
 });
 
 test("moveTask(actor 'agent') to closed on a doubly-failing card (unapproved, no retro) reports the approval error first", () => {
   const { store } = freshStore();
-  const task = store.createTask({ title: "Do the thing" }); // unapproved, no retro
+  const task = store.createTask({ tags: ["unity-free"], title: "Do the thing" }); // unapproved, no retro
   store.moveTask(task.id, "in_progress");
   assert.throws(() => store.moveTask(task.id, "closed", null, { actor: "agent" }), /approval/);
 });
 
 test("moveTask(actor 'agent') succeeds for a task created no_review, with no reply at all", () => {
   const { store } = freshStore();
-  const task = store.createTask({ title: "Trivial task", noReview: true });
+  const task = store.createTask({ tags: ["unity-free"], title: "Trivial task", noReview: true });
   store.moveTask(task.id, "in_progress");
   const moved = store.moveTask(task.id, "landing", null, { actor: "agent" });
   assert.equal(moved.state, "landing");
@@ -913,8 +959,8 @@ test("moveTask(actor 'agent') succeeds for a task created no_review, with no rep
 
 test("moveTask(actor 'agent') refused move fires no unblock notices for dependents", () => {
   const { store } = freshStore();
-  const blocker = store.createTask({ title: "Blocker" });
-  const dependent = store.createTask({ title: "Dependent", blockedBy: [blocker.id] });
+  const blocker = store.createTask({ tags: ["unity-free"], title: "Blocker" });
+  const dependent = store.createTask({ tags: ["unity-free"], title: "Dependent", blockedBy: [blocker.id] });
   store.acknowledge([dependent.id]);
   assert.throws(() => store.moveTask(blocker.id, "landing", null, { actor: "agent" }));
   assert.equal(
@@ -926,9 +972,9 @@ test("moveTask(actor 'agent') refused move fires no unblock notices for dependen
 
 test("createTask accepts noReview and stores it on the card", () => {
   const { store } = freshStore();
-  const task = store.createTask({ title: "Trivial", noReview: true });
+  const task = store.createTask({ tags: ["unity-free"], title: "Trivial", noReview: true });
   assert.equal(task.noReview, true);
-  const other = store.createTask({ title: "Normal" });
+  const other = store.createTask({ tags: ["unity-free"], title: "Normal" });
   assert.equal(other.noReview, undefined);
 });
 
@@ -1005,7 +1051,7 @@ test("reopen also accepts a card currently in landing (not just closed)", () => 
 
 test("reopen throws on a card that isn't closed or landing (e.g. backlog/in_progress), leaving it untouched", () => {
   const { store } = freshStore();
-  const task = store.createTask({ title: "Do the thing" }); // state backlog
+  const task = store.createTask({ tags: ["unity-free"], title: "Do the thing" }); // state backlog
   assert.throws(() => store.reopen(task.id), /closed|landing/);
   store.moveTask(task.id, "in_progress");
   assert.throws(() => store.reopen(task.id), /closed|landing/);
@@ -1031,7 +1077,7 @@ test("gate integration: reopening a previously-approved closed card makes agentM
 
 test("moveTask and agentReply record the declared agent on the card", () => {
   const { store } = freshStore();
-  const task = store.createTask({ title: "T" });
+  const task = store.createTask({ tags: ["unity-free"], title: "T" });
   store.moveTask(task.id, "in_progress", undefined, { agent: { vendor: "claude", model: "Fable 5.1", effort: "max" } });
   assert.deepEqual(store.list().find((m) => m.id === task.id).agent, { vendor: "claude", model: "Fable 5.1", effort: "max" });
   store.agentReply(task.id, "handing over", "update", { agent: { vendor: "codex", model: "GPT-5.4", effort: "high" } });
@@ -1043,7 +1089,7 @@ test("moveTask and agentReply record the declared agent on the card", () => {
 
 test("moveTask with a bad blocked_by leaves the card untouched: no state, thread or agent change", () => {
   const { store } = freshStore();
-  const task = store.createTask({ title: "T" });
+  const task = store.createTask({ tags: ["unity-free"], title: "T" });
   assert.throws(() => store.moveTask(task.id, "in_progress", "starting", { actor: "agent", agent: AGENT, blockedBy: ["nope"] }), /No message nope/);
   const after = store.list().find((m) => m.id === task.id);
   assert.equal(after.state, "backlog");
@@ -1053,7 +1099,7 @@ test("moveTask with a bad blocked_by leaves the card untouched: no state, thread
 
 test("a card sent back to backlog (reopen or move) drops its agent: nobody works it any more", () => {
   const { store } = freshStore();
-  const task = store.createTask({ title: "T", noReview: true });
+  const task = store.createTask({ tags: ["unity-free"], title: "T", noReview: true });
   store.moveTask(task.id, "in_progress", null, { actor: "agent", agent: AGENT });
   store.moveTask(task.id, "backlog");
   assert.equal(store.list().find((m) => m.id === task.id).agent, undefined);
@@ -1068,8 +1114,8 @@ test("a card sent back to backlog (reopen or move) drops its agent: nobody works
 
 test("tags: createTask and moveTask store them normalized; a human message derives them from #words in its text", () => {
   const { store } = freshStore();
-  const task = store.createTask({ title: "T", tags: [" Linux", "3C-Unity", "linux", ""] });
-  assert.deepEqual(store.list().find((m) => m.id === task.id).tags, ["linux", "3c-unity"]);
+  const task = store.createTask({ title: "T", tags: [" Linux", "3C-Unity", "linux", "", " UNITY "] });
+  assert.deepEqual(store.list().find((m) => m.id === task.id).tags, ["linux", "3c-unity", "unity"]);
   store.moveTask(task.id, "in_progress", null, { actor: "agent", agent: AGENT, tags: ["windows"] });
   assert.deepEqual(store.list().find((m) => m.id === task.id).tags, ["windows"]);
   store.moveTask(task.id, "questions", QUESTION, { actor: "agent", tags: [] });
@@ -1084,7 +1130,7 @@ test("tags: createTask and moveTask store them normalized; a human message deriv
 
 test("F7 reports go straight to backlog; cards left in the old report_review intake migrate to backlog", () => {
   const { store } = freshStore();
-  const filed = store.createTask({ title: "F7 : Court empty", taskKind: "feedback", priority: 1 });
+  const filed = store.createTask({ tags: ["unity-free"], title: "F7 : Court empty", taskKind: "feedback", priority: 1 });
   assert.equal(filed.state, "backlog");
   assert.equal(filed.priority, 1);
   assert.ok(store.peekDeliverable().some((m) => m.id === filed.id));

@@ -104,7 +104,18 @@ inlines the same media only and skips any other attachment.
 
 Call the MCP `create_task` tool with `taskKind: "feedback"`, `title`, and `context`
 (Markdown, optionally linking to `downloadUrl`) to file a real feedback card in
-the backlog/retours group. The HTTP MCP endpoints are `/mcp` and `/mcp-live`;
+the backlog/retours group. Every new card also requires `tags` containing at least
+one work classification: `unity` (needs a Unity editor/pool copy), `unity-free`
+(no Unity editor needed), or `koh2` (needs the original game installed).
+This applies to every `taskKind`, including `feedback` and `change-request`.
+`request_change` explicitly assigns `unity-free` because it proposes board work.
+Existing cards are unchanged; `move_task` can still replace or clear their tags.
+The public F7 intake accepts the same work tags and returns a JSON-RPC `-32602`
+error naming the choices when none is supplied. F7 clients without tags cannot
+file new cards until updated: the current game client shows delivery failure and
+retains its report and full refusal on disk for retry. Replays of an existing report marker still
+return its original card, including legacy untagged cards.
+The HTTP MCP endpoints are `/mcp` and `/mcp-live`;
 there is no separate REST create-task endpoint. Omitting `taskKind` still creates
 a `projet` card, and the first MCP result block remains the bare card id.
 Feedback context appears on compact cards and in full in expanded cards/overlays.

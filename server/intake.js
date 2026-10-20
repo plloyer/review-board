@@ -95,19 +95,30 @@ function createIntakeApp({
     const call = req.body || {};
     if (call.jsonrpc !== "2.0" || call.method !== "tools/call" || !call.params || call.params.name !== "create_task")
       return rpcError(res, call.id, -32601, "only tools/call create_task is accepted");
-    const { title, context } = call.params.arguments || {};
+    const { title, context, tags } = call.params.arguments || {};
     if (typeof title !== "string" || typeof context !== "string" || title.length > MAX_TITLE || context.length > MAX_CONTEXT)
       return rpcError(res, call.id, -32602, "title and context are required strings within their limits");
     const marker = (context.match(/\[three-crowns-report:[A-Za-z0-9-]{1,64}\]/) || [""])[0];
     if (!marker) return rpcError(res, call.id, -32602, "context must carry the report marker");
     // A resend of a report the board already holds answers the existing card instead of a duplicate.
     const existing = cardsWithMarker(marker)[0];
-    const card = existing || store.createTask({
-      title: reportTitle(title),
-      context,
-      project: PROJECT,
-      taskKind: "feedback",
-    });
+    let card = existing;
+    if (!card) {
+      if (tags !== undefined && (!Array.isArray(tags) || tags.some((tag) => typeof tag !== "string")))
+        return rpcError(res, call.id, -32602, "tags must be an array of strings; choose unity, unity-free or koh2");
+      try {
+        card = store.createTask({
+          title: reportTitle(title),
+          context,
+          project: PROJECT,
+          taskKind: "feedback",
+          tags,
+        });
+      } catch (error) {
+        // The F7 client surfaces delivery failure and keeps the refusal/report on disk.
+        return rpcError(res, call.id, -32602, error.message);
+      }
+    }
     res.json({ jsonrpc: "2.0", id: call.id === undefined ? null : call.id, result: { content: [{ type: "text", text: card.id }] } });
   });
 

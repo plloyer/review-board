@@ -105,7 +105,7 @@ process.env.REVIEW_BOARD_DATA_DIR = directory;
 process.env.REVIEW_BOARD_NO_SUMMARY = "1";
 const store = require("../server/store");
 test("store persists evidence, updates replay journal once, and rejects cross-card duplicates and stale human votes", () => {
-  const card = store.createTask({ title: "Scoped publication" });
+  const card = store.createTask({ tags: ["unity-free"], title: "Scoped publication" });
   store.recordExecutionEvent(card.id, observed);
   store.recordExecutionEvent(card.id, denied);
   const before = store.replayEvents(0).sequence;
@@ -118,7 +118,7 @@ test("store persists evidence, updates replay journal once, and rejects cross-ca
   assert.equal(store.replayEvents(before).events.at(-1).author, "human");
   const saved = JSON.parse(fs.readFileSync(path.join(directory, "messages.json")));
   assert.equal(saved.messages.find(entry => entry.id === card.id).execution.nativeAuthorization, "unavailable");
-  const other = store.createTask({ title: "Other" });
+  const other = store.createTask({ tags: ["unity-free"], title: "Other" });
   assert.throws(() => store.recordExecutionEvent(other.id, { ...observed, id: "copied" }), /belongs/);
   const changed = { ...action, version: "b".repeat(40) };
   store.recordExecutionEvent(card.id, { ...observed, id: "changed", action: changed, actionId: trace.actionId(changed) });
@@ -126,7 +126,7 @@ test("store persists evidence, updates replay journal once, and rejects cross-ca
   assert.equal(card.state, "backlog");
 });
 test("failed durable write rolls back the trace and journal", () => {
-  const card = store.createTask({ title: "Persistence failure" });
+  const card = store.createTask({ tags: ["unity-free"], title: "Persistence failure" });
   const changed = { ...action, threadId: "persistence-test" };
   const before = store.replayEvents(0).sequence;
   const rename = fs.renameSync;

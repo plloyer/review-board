@@ -28,10 +28,43 @@ async function connectedClient(mcp) {
   return client;
 }
 
+test("create_task requires a work tag through MCP for every kind and accepts each choice", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  try {
+    for (const taskKind of [undefined, "projet", "feedback", "change-request"]) {
+      for (const tags of [undefined, [], ["mac", "3c-unity"]]) {
+        const count = store.list().length;
+        const result = await client.callTool({ name: "create_task", arguments: { title: "Unclassified", taskKind, tags } });
+        assert.equal(result.isError, true);
+        assert.match(result.content[0].text, /Work tag required: choose unity, unity-free or koh2/);
+        assert.equal(store.list().length, count);
+      }
+      for (const tag of ["unity", "unity-free", "koh2"]) {
+        const result = await client.callTool({ name: "create_task", arguments: { title: "Classified", taskKind, tags: [` ${tag.toUpperCase()} `] } });
+        assert.equal(result.isError, undefined);
+        const card = store.list().find((card) => card.id === result.content[0].text);
+        assert.equal(card.taskKind, taskKind ?? "projet");
+        assert.deepEqual(card.tags, [tag]);
+      }
+    }
+    const tools = (await client.listTools()).tools;
+    const create = tools.find((tool) => tool.name === "create_task");
+    for (const tag of ["unity", "unity-free", "koh2"]) {
+      assert.ok(create.description.includes(tag));
+      assert.ok(create.inputSchema.properties.tags.description.includes(tag));
+    }
+    assert.match(tools.find((tool) => tool.name === "request_change").description, /unity-free/);
+    assert.match(client.getInstructions(), /create_task requires at least one work tag for every taskKind/);
+  } finally {
+    await client.close();
+  }
+});
+
 test("create_task files a backlog project task", async () => {
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
-  const res = await client.callTool({ name: "create_task", arguments: { title: "Refactor the thing" } });
+  const res = await client.callTool({ name: "create_task", arguments: { tags: ["unity-free"], title: "Refactor the thing" } });
   const id = res.content[0].text;
   const task = store.list().find((m) => m.id === id);
   assert.equal(task.state, "backlog");
@@ -44,17 +77,17 @@ test("create_task priority defaults apply through MCP without changing explicit 
   const client = await connectedClient(mcp);
   try {
     for (const priority of [undefined, 0, 1, 2, 3]) {
-      const arguments_ = { title: "Project priority", taskKind: "projet" };
+      const arguments_ = { tags: ["unity-free"], title: "Project priority", taskKind: "projet" };
       if (priority !== undefined) arguments_.priority = priority;
       const result = await client.callTool({ name: "create_task", arguments: arguments_ });
       assert.equal(result.isError, undefined);
       assert.equal(store.list().find((m) => m.id === result.content[0].text).priority, priority ?? 2);
     }
-    const feedback = await client.callTool({ name: "create_task", arguments: { title: "Player report", taskKind: "feedback" } });
+    const feedback = await client.callTool({ name: "create_task", arguments: { tags: ["unity-free"], title: "Player report", taskKind: "feedback" } });
     assert.equal(store.list().find((m) => m.id === feedback.content[0].text).priority, undefined);
     const count = store.list().length;
     for (const priority of [null, -1, 4, 1.5, "2", true]) {
-      const result = await client.callTool({ name: "create_task", arguments: { title: "Invalid priority", priority } });
+      const result = await client.callTool({ name: "create_task", arguments: { tags: ["unity-free"], title: "Invalid priority", priority } });
       assert.equal(result.isError, true);
       assert.equal(store.list().length, count);
     }
@@ -68,15 +101,15 @@ test("create_task accepts feedback, advertises its enum, and rejects unknown kin
   const client = await connectedClient(mcp);
   try {
     const tools = await client.listTools();
-    assert.deepEqual(tools.tools.find((t) => t.name === "create_task").inputSchema.properties.taskKind.enum, ["projet", "feedback"]);
+    assert.deepEqual(tools.tools.find((t) => t.name === "create_task").inputSchema.properties.taskKind.enum, ["projet", "feedback", "change-request"]);
     const context = "Player crash after loading. [Save](/api/file?path=save.tc)";
-    const result = await client.callTool({ name: "create_task", arguments: { title: "Player bug", taskKind: "feedback", context } });
+    const result = await client.callTool({ name: "create_task", arguments: { tags: ["unity-free"], title: "Player bug", taskKind: "feedback", context } });
     assert.equal(result.content.length, 2);
     const card = store.list().find((m) => m.id === result.content[0].text);
     assert.equal(card.taskKind, "feedback");
     assert.equal(card.state, "backlog");
     assert.equal(card.context, context);
-    const invalid = await client.callTool({ name: "create_task", arguments: { title: "Bad", taskKind: "unknown" } });
+    const invalid = await client.callTool({ name: "create_task", arguments: { tags: ["unity-free"], title: "Bad", taskKind: "unknown" } });
     assert.equal(invalid.isError, true);
     assert.equal(store.list().length, 1);
     const delivery = await client.callTool({ name: "await_replies", arguments: { timeoutSeconds: 1 } });
@@ -89,7 +122,7 @@ test("create_task accepts feedback, advertises its enum, and rejects unknown kin
 test("create_task returns the bare id as its first block, unchanged, plus a dependency reminder block", async () => {
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
-  const res = await client.callTool({ name: "create_task", arguments: { title: "T" } });
+  const res = await client.callTool({ name: "create_task", arguments: { tags: ["unity-free"], title: "T" } });
   // First block stays EXACTLY the id — a caller parsing content[0].text as the id must keep working.
   const first = res.content[0].text;
   assert.match(first, /^u?t?\d+$/); // an id like "t1" — no label, no extra text
@@ -103,7 +136,7 @@ test("create_task returns the bare id as its first block, unchanged, plus a depe
 test("move_task moves a card and rejects an unknown state", async () => {
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
-  const task = store.createTask({ title: "Do the thing" });
+  const task = store.createTask({ tags: ["unity-free"], title: "Do the thing" });
   await client.callTool({ name: "move_task", arguments: { id: task.id, state: "in_progress", agent: AGENT } });
   assert.equal(store.list().find((m) => m.id === task.id).state, "in_progress");
 
@@ -165,7 +198,7 @@ test("reply_to_message kind 'done' stores the retro param on the card", async ()
 test("close_issue refuses a no_review card with no retro anywhere, citing the three-point template", async () => {
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
-  const task = store.createTask({ title: "Trivial task", noReview: true });
+  const task = store.createTask({ tags: ["unity-free"], title: "Trivial task", noReview: true });
   const res = await client.callTool({ name: "close_issue", arguments: { id: task.id } });
   assert.equal(res.isError, true);
   assert.match(res.content[0].text, /Friction encountered/);
@@ -177,7 +210,7 @@ test("close_issue refuses a no_review card with no retro anywhere, citing the th
 test("close_issue succeeds on a no_review card when a retro is passed at close time", async () => {
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
-  const task = store.createTask({ title: "Trivial task", noReview: true });
+  const task = store.createTask({ tags: ["unity-free"], title: "Trivial task", noReview: true });
   const res = await client.callTool({ name: "close_issue", arguments: { id: task.id, retro: "friction: none, gaps: none, different: none" } });
   assert.equal(res.isError, undefined, res.content?.[0]?.text);
   const closed = store.list().find((m) => m.id === task.id);
@@ -188,7 +221,7 @@ test("close_issue succeeds on a no_review card when a retro is passed at close t
 test("close_issue succeeds on a no_review card whose retro was already attached by the done delivery", async () => {
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
-  const task = store.createTask({ title: "Trivial task", noReview: true });
+  const task = store.createTask({ tags: ["unity-free"], title: "Trivial task", noReview: true });
   store.agentReply(task.id, "done, proof attached", "done", { retro: "friction: none" });
   const res = await client.callTool({ name: "close_issue", arguments: { id: task.id } });
   assert.equal(res.isError, undefined, res.content?.[0]?.text);
@@ -236,7 +269,7 @@ test("reply_to_message rejects a retro param on any kind other than 'done', with
 test("the approved human-direction workflow lands: create_task -> done -> Approuvé -> move_task landing", async () => {
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
-  await client.callTool({ name: "create_task", arguments: { title: "wire the menu", context: "c" } });
+  await client.callTool({ name: "create_task", arguments: { tags: ["unity-free"], title: "wire the menu", context: "c" } });
   const task = store.list().find((m) => m.title === "wire the menu");
   await client.callTool({ name: "move_task", arguments: { id: task.id, state: "in_progress", agent: AGENT } });
   store.agentReply(task.id, "done, proof attached", "done");
@@ -251,18 +284,18 @@ test("the approved human-direction workflow lands: create_task -> done -> Approu
 test("create_task/move_task accept blocked_by and priority; set_blockers/set_priority tools work standalone", async () => {
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
-  const blocker = store.createTask({ title: "Blocker" });
+  const blocker = store.createTask({ tags: ["unity-free"], title: "Blocker" });
 
   const created = await client.callTool({
     name: "create_task",
-    arguments: { title: "Dependent", blocked_by: [blocker.id], priority: 1 },
+    arguments: { tags: ["unity-free"], title: "Dependent", blocked_by: [blocker.id], priority: 1 },
   });
   const depId = created.content[0].text;
   const dep = store.list().find((m) => m.id === depId);
   assert.deepEqual(dep.blockedBy, [blocker.id]);
   assert.equal(dep.priority, 1);
 
-  const other = store.createTask({ title: "Other" });
+  const other = store.createTask({ tags: ["unity-free"], title: "Other" });
   await client.callTool({ name: "move_task", arguments: { id: other.id, state: "in_progress", agent: AGENT, blocked_by: [blocker.id], priority: 3 } });
   const movedOther = store.list().find((m) => m.id === other.id);
   assert.deepEqual(movedOther.blockedBy, [blocker.id]);
@@ -279,11 +312,11 @@ test("create_task with priority 0 roundtrips, and set_priority to 0 works", asyn
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
 
-  const created = await client.callTool({ name: "create_task", arguments: { title: "Critical", priority: 0 } });
+  const created = await client.callTool({ name: "create_task", arguments: { tags: ["unity-free"], title: "Critical", priority: 0 } });
   const id = created.content[0].text;
   assert.equal(store.list().find((m) => m.id === id).priority, 0);
 
-  const other = store.createTask({ title: "Other" });
+  const other = store.createTask({ tags: ["unity-free"], title: "Other" });
   await client.callTool({ name: "set_priority", arguments: { id: other.id, priority: 0 } });
   assert.equal(store.list().find((m) => m.id === other.id).priority, 0);
 });
@@ -291,8 +324,8 @@ test("create_task with priority 0 roundtrips, and set_priority to 0 works", asyn
 test("set_blockers rejects a cycle through the MCP tool boundary", async () => {
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
-  const a = store.createTask({ title: "A" });
-  const b = store.createTask({ title: "B" });
+  const a = store.createTask({ tags: ["unity-free"], title: "A" });
+  const b = store.createTask({ tags: ["unity-free"], title: "B" });
   await client.callTool({ name: "set_blockers", arguments: { id: a.id, blocked_by: [b.id] } });
   const res = await client.callTool({ name: "set_blockers", arguments: { id: b.id, blocked_by: [a.id] } });
   assert.equal(res.isError, true);
@@ -301,7 +334,7 @@ test("set_blockers rejects a cycle through the MCP tool boundary", async () => {
 test("create_task with no_review roundtrips onto the card, visible via list_messages like any other task", async () => {
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
-  const res = await client.callTool({ name: "create_task", arguments: { title: "Trivial task", no_review: true } });
+  const res = await client.callTool({ name: "create_task", arguments: { tags: ["unity-free"], title: "Trivial task", no_review: true } });
   const id = res.content[0].text;
   assert.equal(store.list().find((m) => m.id === id).noReview, true);
   const listed = await client.callTool({ name: "list_messages", arguments: {} });
@@ -311,7 +344,7 @@ test("create_task with no_review roundtrips onto the card, visible via list_mess
 test("move_task to landing on a normal in_progress card returns the instructive error and leaves it in place", async () => {
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
-  const task = store.createTask({ title: "Do the thing" });
+  const task = store.createTask({ tags: ["unity-free"], title: "Do the thing" });
   await client.callTool({ name: "move_task", arguments: { id: task.id, state: "in_progress", agent: AGENT } });
 
   const res = await client.callTool({ name: "move_task", arguments: { id: task.id, state: "landing" } });
@@ -324,7 +357,7 @@ test("move_task to landing on a normal in_progress card returns the instructive 
 test("move_task to landing succeeds for a no_review card", async () => {
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
-  const created = await client.callTool({ name: "create_task", arguments: { title: "Trivial task", no_review: true } });
+  const created = await client.callTool({ name: "create_task", arguments: { tags: ["unity-free"], title: "Trivial task", no_review: true } });
   const id = created.content[0].text;
   await client.callTool({ name: "move_task", arguments: { id, state: "in_progress", agent: AGENT } });
 
@@ -337,6 +370,7 @@ test("request_change files a backlog change-request card", async () => {
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
   const res = await client.callTool({ name: "request_change", arguments: { title: "Add snooze", details: "defer a card" } });
+  assert.deepEqual(store.list().find((card) => card.id === res.content[0].text).tags, ["unity-free"]);
   const id = res.content[0].text;
   const card = store.list().find((m) => m.id === id);
   assert.equal(card.taskKind, "change-request");
@@ -347,8 +381,8 @@ test("request_change files a backlog change-request card", async () => {
 test("list_messages appends blocked_by and priority suffixes only where applicable", async () => {
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
-  const blocker = store.createTask({ title: "Blocker" });
-  store.createTask({ title: "Dependent", blockedBy: [blocker.id] });
+  const blocker = store.createTask({ tags: ["unity-free"], title: "Blocker" });
+  store.createTask({ tags: ["unity-free"], title: "Dependent", blockedBy: [blocker.id] });
   store.setPriority(blocker.id, 1);
 
   const res = await client.callTool({ name: "list_messages", arguments: {} });
@@ -360,7 +394,7 @@ test("list_messages appends blocked_by and priority suffixes only where applicab
 test("list_messages shows a P0 card", async () => {
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
-  const critical = store.createTask({ title: "Critical", priority: 0 });
+  const critical = store.createTask({ tags: ["unity-free"], title: "Critical", priority: 0 });
 
   const res = await client.callTool({ name: "list_messages", arguments: {} });
   assert.match(res.content[0].text, new RegExp(`\\[${critical.id}\\].*Critical.* p0`));
@@ -457,10 +491,10 @@ test("reply_to_message accepts an existing local path, an http(s) URL, and a dat
 test("list_messages blocked_by suffix lists only ACTIVE blockers, matching the UI", async () => {
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
-  const resolvedBlocker = store.createTask({ title: "Resolved blocker" });
-  const activeBlocker = store.createTask({ title: "Active blocker" });
+  const resolvedBlocker = store.createTask({ tags: ["unity-free"], title: "Resolved blocker" });
+  const activeBlocker = store.createTask({ tags: ["unity-free"], title: "Active blocker" });
   store.moveTask(resolvedBlocker.id, "closed");
-  const dependent = store.createTask({ title: "Dependent", blockedBy: [resolvedBlocker.id, activeBlocker.id] });
+  const dependent = store.createTask({ tags: ["unity-free"], title: "Dependent", blockedBy: [resolvedBlocker.id, activeBlocker.id] });
 
   const res = await client.callTool({ name: "list_messages", arguments: {} });
   const depLine = res.content[0].text.split("\n").find((l) => l.startsWith(`[${dependent.id}]`));
@@ -485,7 +519,7 @@ test("recent_history also finds a live (never-archived) delivered item", async (
 test("move_task in_progress requires the agent declaration and stores it", async () => {
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
-  const task = store.createTask({ title: "T" });
+  const task = store.createTask({ tags: ["unity-free"], title: "T" });
   const missing = await client.callTool({ name: "move_task", arguments: { id: task.id, state: "in_progress" } });
   assert.equal(missing.isError, true);
   assert.match(missing.content[0].text, /agent/);
@@ -516,7 +550,7 @@ test("move_task in_progress requires the agent declaration and stores it", async
 test("reply_to_message accepts an agent declaration when a card changes hands", async () => {
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
-  const task = store.createTask({ title: "T" });
+  const task = store.createTask({ tags: ["unity-free"], title: "T" });
   await client.callTool({ name: "move_task", arguments: { id: task.id, state: "in_progress", agent: AGENT } });
   const res = await client.callTool({
     name: "reply_to_message",

@@ -17,7 +17,7 @@ async function withServer(run) {
   finally { await new Promise(resolve => server.close(resolve)); }
 }
 test("HTTP evidence delivery, scoped human consent and replay never execute or grant native permission", async () => {
-  const card = store.createTask({ title: "Execution integration" });
+  const card = store.createTask({ tags: ["unity-free"], title: "Execution integration" });
   await withServer(async base => {
     const post = (suffix, body) => fetch(`${base}/api/messages/${card.id}/${suffix}`, {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -43,7 +43,7 @@ test("HTTP evidence delivery, scoped human consent and replay never execute or g
   });
 });
 test("MCP exposes the same evidence contract without a native-approval tool", async () => {
-  const card = store.createTask({ title: "MCP trace" });
+  const card = store.createTask({ tags: ["unity-free"], title: "MCP trace" });
   await withServer(async base => {
     const client = new Client({ name: "trace-tests", version: "1" });
     await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`)));
