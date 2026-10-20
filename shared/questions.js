@@ -11,7 +11,8 @@
   function parse(text, suppliedOptions = [], title = "") {
     // post.py appends proof images after its provenance line. Keep those image
     // paragraphs for presentation without making them part of the decision fields.
-    const [unsigned, ...footer] = String(text || "").split(/\r?\nPosted by:[^\r\n]*(?:\r?\n|$)/i);
+    const [unsigned, ...footer] = String(text || "").replace(/^Posted by:[^\r\n]*(?:\r?\n|$)/i, "")
+      .split(/\r?\nPosted by:[^\r\n]*(?:\r?\n|$)/i);
     const imageLines = [];
     const body = unsigned.replace(/^[\t ]*!\[[^\r\n]*\r?$/gm, (line) => { imageLines.push(line.trim()); return ""; }).trim();
     const attachments = [...imageLines, ...footer.join("\n").split(/\r?\n\s*\r?\n/)
@@ -53,7 +54,8 @@
     const consequence = (sections.consequence || "").trim();
     if (explicit && !consequence) return { error: "give the consequence of this owner decision" };
     return { question, options, recommendation, consequence, legacy: !explicit,
-      explanation: introduction.join("\n").trim(), attachments, details: (sections.details || "").trim() };
+      // Only an explicit Question heading separates context from decision text.
+      explanation: explicit ? introduction.join("\n").trim() : "", attachments, details: (sections.details || "").trim() };
   }
 
   function latest(msg) {

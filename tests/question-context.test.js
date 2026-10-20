@@ -71,3 +71,42 @@ test("an owner answer and non-Questions state keep the ordinary full thread", ()
     assert.match(html, /The <strong>save window<\/strong>/);
   }
 });
+
+test("a board.py root question excludes leading and trailing provenance from visible context", () => {
+  for (const newline of ["\n", "\r\n"]) {
+    const message = { id: "signed-root-context", direction: "agent", kind: "question", state: "questions", status: "open",
+      context: `Posted by: leading-host\n\n${question}`.replace(/\n/g, newline), thread: [] };
+    for (const render of Object.values(surfaces)) checkVisibleQuestion(render(message));
+  }
+});
+
+test("a legacy reply shows its decision fields once without treating them as explanation", () => {
+  const message = { id: "legacy-reply-context", direction: "human", state: "questions", status: "open",
+    context: "Original card description.", thread: [{ from: "agent", kind: "question",
+      text: `Intro.\nValides-tu cet affichage ?\nA : Oui\nB : Non\nJe recommande A.\n\nPosted by: test-host\n\n${proof}` }] };
+  for (const render of Object.values(surfaces)) {
+    const html = render(message), fold = html.indexOf('<details class="question-details">');
+    assert.ok(fold > 0);
+    const visible = html.slice(0, fold);
+    assert.equal((visible.match(/Valides-tu cet affichage/g) || []).length, 1);
+    assert.equal((visible.match(/Je recommande A\./g) || []).length, 1);
+    assert.equal((visible.match(/data-opt=/g) || []).length, 2);
+    assert.doesNotMatch(visible, /Intro\.|Posted by|<p>A : Oui|<p>B : Non/);
+    assert.match(visible, /<img class="embedded-image"/);
+    assert.ok(visible.indexOf('alt="After"') < visible.indexOf("<h3>Question</h3>"));
+  }
+});
+
+test("the legacy root text/options API shows its recommendation once", () => {
+  const message = { id: "legacy-root-context", direction: "agent", kind: "question", state: "questions", status: "open",
+    title: "On accepte cet affichage ?", context: "Je recommande OUI.", options: ["OUI", "NON"], thread: [] };
+  for (const render of Object.values(surfaces)) {
+    const html = render(message), fold = html.indexOf('<details class="question-details">');
+    assert.ok(fold > 0);
+    const visible = html.slice(0, fold);
+    assert.equal((visible.match(/On accepte cet affichage/g) || []).length, 1);
+    assert.equal((visible.match(/Je recommande OUI\./g) || []).length, 1);
+    assert.equal((visible.match(/data-opt=/g) || []).length, 2);
+    assert.doesNotMatch(visible, /class="question-context"/);
+  }
+});
