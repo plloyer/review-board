@@ -32,6 +32,40 @@ test("a later owner answer makes a previous question historical", () => {
 
 module.exports.validQuestion = valid;
 
+test("presentation retains the explanation and uploaded images after provenance without polluting decision fields", () => {
+  const introduction = "The save window now keeps its heading above the list.\n\nThe selected row stays highlighted.";
+  const image = '![After](/api/image?path=%2Fproof%2Fafter.png "The selected save row")';
+  for (const newline of ["\n", "\r\n"]) {
+    const result = Questions.requireDecision(`${introduction}\n\n${valid}\n\nPosted by: test-host\n\n${image}`.replace(/\n/g, newline));
+    assert.equal(result.explanation.replace(/\r/g, ""), introduction);
+    assert.equal(result.attachments, image);
+    assert.equal(result.consequence, "Le prochain écran utilise cet affichage.");
+    assert.doesNotMatch(JSON.stringify(result), /Posted by|test-host/);
+  }
+});
+
+test("standalone images before or after the decision are presentation, not answer text", () => {
+  const image = '![Proof](/api/image?path=proof.png "What the window shows")';
+  for (const body of [`${image}\n\n${valid}`, `${valid}\n\n${image}`, `${valid}\n\n${image}`.replace(/\n/g, "\r\n")]) {
+    const result = Questions.requireDecision(body);
+    assert.equal(result.attachments, image);
+    assert.equal(result.explanation, "");
+    assert.equal(result.consequence, "Le prochain écran utilise cet affichage.");
+  }
+});
+
+test("latest identifies the active question across later updates and does not select older context", () => {
+  const result = Questions.latest({ direction: "human", thread: [
+    { from: "agent", kind: "question", text: `Old context.\n\n${valid}` },
+    { from: "human", text: "Please explain." },
+    { from: "agent", kind: "question", text: `Current context.\n\n${valid}` },
+    { from: "agent", kind: "update", text: "A later log entry." },
+  ] });
+  assert.equal(result.explanation, "Current context.");
+  assert.equal(result.threadIndex, 2);
+  assert.equal(Questions.latest({ direction: "agent", kind: "question", context: valid }).threadIndex, -1);
+});
+
 test("review probes: technical adjectives, bundled choices and Details cannot invent decisions", () => {
   for (const question of ["Le test de hash est-il valide ?", "Is the build acceptable after the rerun ?",
     "Valides-tu le texte ainsi que le nouveau cadre et la couleur ?", "Valides-tu le texte, tu choisis aussi le cadre ?"]) {

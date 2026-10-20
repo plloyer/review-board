@@ -197,16 +197,28 @@ function optionsHTML(options) {
     .join("");
 }
 
-function questionFirstBody(msg, technicalHTML, attachmentsHTML = "") {
+function questionFirstBody(msg, { attachmentsHTML = "", includeDetails = false, includeRetro = false } = {}) {
   if (msg.state !== "questions") return null;
   const decision = Questions.latest(msg);
+  const valid = decision && !decision.error;
+  // The active question is presented once, above the fold. Keep all other
+  // entries (including updates posted after it) in their original order.
+  const history = valid ? { ...msg, thread: (msg.thread || []).filter((_, index) => index !== decision.threadIndex) } : msg;
+  const context = msg.context && !(valid && decision.threadIndex === -1)
+    ? `<div class="context md">${markdownHTML(msg.context)}</div>` : "";
+  const details = includeDetails ? detailsHTML(msg.details) : { items: "", blocks: "" };
+  const technicalHTML = `${context}${details.items ? `<ul>${details.items}</ul>` : ""}${details.blocks}
+    <div class="thread">${threadHTML(history)}</div>${includeRetro ? retroHTML(msg) : ""}`;
+  const introduction = valid ? [decision.explanation, decision.attachments].filter(Boolean).join("\n\n") : "";
   const content = !decision || decision.error
     ? `<p class="question-missing">Aucune décision précise à prendre n’est indiquée. Le suivi technique reste dans les détails.</p>`
-    : `<section class="owner-decision"><h3>Question</h3><p>${esc(decision.question)}</p>
+    : `<section class="owner-decision">${introduction ? `<div class="question-context md">${markdownHTML(introduction)}</div>` : ""}
+        ${attachmentsHTML}<h3>Question</h3><p>${esc(decision.question)}</p>
         <div class="question-choices">${msg.direction === "agent" ? optionsHTML(decision.options) : decision.options.map((option) => `<button class="question-option" data-opt="${encodeURIComponent(option)}">${esc(option)}</button>`).join("")}</div>
         <p><strong>Recommandation :</strong> ${esc(decision.recommendation)}</p>
-        <p><strong>Conséquence :</strong> ${esc(decision.consequence || "Non précisée dans cette ancienne question.")}</p></section>`;
-  return `${content}${attachmentsHTML}<details class="question-details"><summary>Détails · description et réponses</summary>${technicalHTML}</details>`;
+        <p><strong>Conséquence :</strong> ${esc(decision.consequence || "Non précisée dans cette ancienne question.")}</p>
+        ${decision.details ? `<div class="md">${markdownHTML(decision.details)}</div>` : ""}</section>`;
+  return `${content}${valid ? "" : attachmentsHTML}<details class="question-details"><summary>Détails · description et réponses</summary>${technicalHTML}</details>`;
 }
 
 // The one-line summary of a reply/decision shown once a card is "answered" —
@@ -619,8 +631,8 @@ function deriveCardView(msg, { pendingCounts } = {}) {
     const core = deriveCardCore(msg);
     const { items: details, blocks: detailBlocks } = detailsHTML(msg.details);
     const context = msg.context ? `<div class="context md">${markdownHTML(msg.context)}</div>` : "";
-    const question = questionFirstBody(msg, `${context}${details ? `<ul>${details}</ul>` : ""}${detailBlocks}${core.threadHTML}`,
-      `${imagesHTML(msg.images, msg.id)}${videosHTML(msg.videos)}`);
+    const question = questionFirstBody(msg, { includeDetails: true,
+      attachmentsHTML: `${imagesHTML(msg.images, msg.id)}${videosHTML(msg.videos)}` });
 
     return {
       kindBadge: core.kindLabel,
@@ -644,7 +656,7 @@ function deriveSentView(msg, delivered, { pendingCounts } = {}) {
     const core = deriveCardCore(msg);
     const read = Boolean(msg.acknowledgedAt);
     const context = msg.context ? `<div class="context md">${markdownHTML(msg.context)}</div>` : "";
-    const question = questionFirstBody(msg, `${context}<div class="thread">${core.threadHTML}</div>${core.retroHTML}`, imagesHTML(msg.images));
+    const question = questionFirstBody(msg, { includeRetro: true, attachmentsHTML: imagesHTML(msg.images) });
     return {
       className: delivered ? "card sent answered" : "card sent",
       cancelable: !delivered && !read,
@@ -695,15 +707,8 @@ function overlayAgentBody(msg) {
   const followupKey = `followup:${msg.id}`;
   const awaitingDecision = core.awaitingDecision;
 
-  const technicalHTML = `
-    ${msg.context ? `<div class="context md">${markdownHTML(msg.context)}</div>` : ""}
-    ${detailItems ? `<ul>${detailItems}</ul>` : ""}
-    ${detailBlocks}
-    ${thread ? `<div class="thread">${thread}</div>` : ""}
-    ${core.retroHTML}
-  `;
   const attachments = `${images ? `<div class="images">${images}</div>` : ""}${videos ? `<div class="videos">${videos}</div>` : ""}`;
-  const question = questionFirstBody(msg, technicalHTML, attachments);
+  const question = questionFirstBody(msg, { includeDetails: true, includeRetro: true, attachmentsHTML: attachments });
   const bodyHTML = (question || `${msg.context ? `<div class="context md">${markdownHTML(msg.context)}</div>` : ""}${detailItems ? `<ul>${detailItems}</ul>` : ""}${detailBlocks}${attachments}${thread ? `<div class="thread">${thread}</div>` : ""}${core.retroHTML}`) + ExecutionView.render(msg);
 
   const footerHTML =
@@ -733,13 +738,8 @@ function overlayHumanBody(msg) {
   const commentKey = `comment:${msg.id}`;
   const approveBtn = core.canApprove ? `<button class="approve-issue-btn">✅ Approuver</button>` : "";
 
-  const technicalHTML = `
-    ${msg.context ? `<div class="context md">${markdownHTML(msg.context)}</div>` : ""}
-    ${thread ? `<div class="thread">${thread}</div>` : ""}
-    ${core.retroHTML}
-  `;
   const attachments = images ? `<div class="images">${images}</div>` : "";
-  const bodyHTML = (questionFirstBody(msg, technicalHTML, attachments) || `${msg.context ? `<div class="context md">${markdownHTML(msg.context)}</div>` : ""}${attachments}${thread ? `<div class="thread">${thread}</div>` : ""}${core.retroHTML}`) + ExecutionView.render(msg);
+  const bodyHTML = (questionFirstBody(msg, { includeRetro: true, attachmentsHTML: attachments }) || `${msg.context ? `<div class="context md">${markdownHTML(msg.context)}</div>` : ""}${attachments}${thread ? `<div class="thread">${thread}</div>` : ""}${core.retroHTML}`) + ExecutionView.render(msg);
 
   const footerHTML = `
     <div class="reply-row overlay-footer-row">

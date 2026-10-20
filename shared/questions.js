@@ -9,8 +9,15 @@
   const secondAction = /\b(?:et|puis|ainsi que|aussi|egalement|and|then|also)\b|[;/]|\bplus\s+(?:le|la|les|un|une|des|ce|cet|cette|ces)\b|,\s*(?:tu|vous|on|nous|you|we)\b/i;
 
   function parse(text, suppliedOptions = [], title = "") {
-    const body = String(text || "").replace(/\nPosted by:[\s\S]*$/i, "").trim();
+    // post.py appends proof images after its provenance line. Keep those image
+    // paragraphs for presentation without making them part of the decision fields.
+    const [unsigned, ...footer] = String(text || "").split(/\r?\nPosted by:[^\r\n]*(?:\r?\n|$)/i);
+    const imageLines = [];
+    const body = unsigned.replace(/^[\t ]*!\[[^\r\n]*\r?$/gm, (line) => { imageLines.push(line.trim()); return ""; }).trim();
+    const attachments = [...imageLines, ...footer.join("\n").split(/\r?\n\s*\r?\n/)
+      .filter((paragraph) => paragraph.includes("!["))].join("\n\n").trim();
     const sections = {};
+    const introduction = [];
     let current = null;
     for (const line of body.split(/\r?\n/)) {
       const heading = line.match(labels);
@@ -19,6 +26,7 @@
         if (sections[current] !== undefined) return { error: "one Question section is required" };
         sections[current] = heading[2];
       } else if (current) sections[current] += "\n" + line;
+      else introduction.push(line);
     }
     const explicit = sections.question !== undefined;
     const source = explicit ? sections.question : [title, body].filter(Boolean).join("\n");
@@ -44,16 +52,18 @@
     if (!recommendation) return { error: "give your recommendation" };
     const consequence = (sections.consequence || "").trim();
     if (explicit && !consequence) return { error: "give the consequence of this owner decision" };
-    return { question, options, recommendation, consequence, legacy: !explicit };
+    return { question, options, recommendation, consequence, legacy: !explicit,
+      explanation: introduction.join("\n").trim(), attachments, details: (sections.details || "").trim() };
   }
 
   function latest(msg) {
     const thread = msg.thread || [];
     for (let i = thread.length - 1; i >= 0; i--) {
       if (thread[i].from === "human") return null;
-      if (thread[i].from === "agent" && thread[i].kind === "question") return parse(thread[i].text);
+      if (thread[i].from === "agent" && thread[i].kind === "question") return { ...parse(thread[i].text), threadIndex: i };
     }
-    return msg.direction === "agent" && msg.kind === "question" ? parse(msg.context, msg.options, msg.title) : null;
+    return msg.direction === "agent" && msg.kind === "question"
+      ? { ...parse(msg.context, msg.options, msg.title), threadIndex: -1 } : null;
   }
 
   function requireDecision(text, options, title) {
