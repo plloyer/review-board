@@ -22,7 +22,8 @@ function checkVisibleQuestion(html) {
   assert.ok(visible.indexOf("The <strong>save window</strong>") >= 0);
   assert.ok(visible.indexOf("The <strong>save window</strong>") < heading);
   assert.match(visible, /<img class="embedded-image" src="\/api\/image\?path=active-proof\.png" alt="After" title="The save window">/);
-  assert.ok(visible.indexOf('alt="After"') < heading);
+  assert.ok(visible.indexOf('alt="After"') > visible.indexOf("Conséquence"));
+  assert.match(visible, /<figcaption>After · The save window<\/figcaption>/);
   assert.equal((html.match(/active-proof\.png/g) || []).length, 1);
   assert.doesNotMatch(history, /The <strong>save window<\/strong>|active-proof\.png/);
   assert.match(visible, /data-opt=/);
@@ -33,7 +34,7 @@ function checkVisibleQuestion(html) {
   return { visible, history };
 }
 
-test("the active reply's explanation and image are above Question on every expanded surface", () => {
+test("the active reply's explanation precedes Question and its labeled images follow Consequence on every expanded surface", () => {
   for (const direction of ["human", "agent"]) {
     const message = { id: `active-context-${direction}`, direction, kind: "question", state: "questions", status: "open",
       context: "Original card description.", images: [{ path: "card-proof.png", label: "Card attachment" }],
@@ -46,6 +47,8 @@ test("the active reply's explanation and image are above Question on every expan
     for (const render of Object.values(surfaces)) {
       const { visible, history } = checkVisibleQuestion(render(message));
       assert.match(visible, /card-proof\.png/);
+      assert.ok(visible.indexOf("card-proof.png") > visible.indexOf("Conséquence"));
+      assert.match(visible, /<figcaption>Card attachment<\/figcaption>/);
       assert.doesNotMatch(visible, /Old explanation|Which window|Later technical note|Original card description/);
       for (const text of ["Old explanation.", "Which window?", "Later technical note.", "Original card description."]) assert.ok(history.includes(text));
     }
@@ -93,7 +96,7 @@ test("a legacy reply shows its decision fields once without treating them as exp
     assert.equal((visible.match(/data-opt=/g) || []).length, 2);
     assert.doesNotMatch(visible, /Intro\.|Posted by|<p>A : Oui|<p>B : Non/);
     assert.match(visible, /<img class="embedded-image"/);
-    assert.ok(visible.indexOf('alt="After"') < visible.indexOf("<h3>Question</h3>"));
+    assert.ok(visible.indexOf('alt="After"') > visible.indexOf("Conséquence"));
   }
 });
 

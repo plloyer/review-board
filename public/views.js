@@ -197,6 +197,19 @@ function optionsHTML(options) {
     .join("");
 }
 
+// Labels must be readable beside the proof, without opening the lightbox.
+// Attribute values have already been escaped by the Markdown/attachment renderer.
+function labeledImagesHTML(html) {
+  // Markdown wraps standalone images in paragraphs. Remove those wrappers
+  // before inserting block-level figures (also avoids empty flex children).
+  return html.replace(/<p>(\s*(?:<img\b[^>]*>\s*(?:<br\s*\/?>\s*)?)+)<\/p>/g, "$1").replace(/<img\b[^>]*>/g, (image) => {
+    const label = (image.match(/\balt="([^"]*)"/) || [])[1];
+    const caption = (image.match(/\btitle="([^"]*)"/) || [])[1];
+    const text = [label, caption].filter(Boolean).join(" · ");
+    return text ? `<figure class="proof-image">${image}<figcaption>${text}</figcaption></figure>` : image;
+  });
+}
+
 function questionFirstBody(msg, { attachmentsHTML = "", includeDetails = false, includeRetro = false } = {}) {
   if (msg.state !== "questions") return null;
   const decision = Questions.latest(msg);
@@ -209,16 +222,32 @@ function questionFirstBody(msg, { attachmentsHTML = "", includeDetails = false, 
   const details = includeDetails ? detailsHTML(msg.details) : { items: "", blocks: "" };
   const technicalHTML = `${context}${details.items ? `<ul>${details.items}</ul>` : ""}${details.blocks}
     <div class="thread">${threadHTML(history)}</div>${includeRetro ? retroHTML(msg) : ""}`;
-  const introduction = valid ? [decision.explanation, decision.attachments].filter(Boolean).join("\n\n") : "";
+  const introduction = valid ? decision.explanation : "";
   const content = !decision || decision.error
     ? `<p class="question-missing">Aucune décision précise à prendre n’est indiquée. Le suivi technique reste dans les détails.</p>`
     : `<section class="owner-decision">${introduction ? `<div class="question-context md">${markdownHTML(introduction)}</div>` : ""}
-        ${attachmentsHTML}<h3>Question</h3><p>${esc(decision.question)}</p>
+        <h3>Question</h3><p>${esc(decision.question)}</p>
         <div class="question-choices">${msg.direction === "agent" ? optionsHTML(decision.options) : decision.options.map((option) => `<button class="question-option" data-opt="${encodeURIComponent(option)}">${esc(option)}</button>`).join("")}</div>
         <p><strong>Recommandation :</strong> ${esc(decision.recommendation)}</p>
         <p><strong>Conséquence :</strong> ${esc(decision.consequence || "Non précisée dans cette ancienne question.")}</p>
         ${decision.details ? `<div class="md">${markdownHTML(decision.details)}</div>` : ""}</section>`;
-  return `${content}${valid ? "" : attachmentsHTML}<details class="question-details"><summary>Détails · description et réponses</summary>${technicalHTML}</details>`;
+  const proof = valid && decision.attachments ? labeledImagesHTML(markdownHTML(decision.attachments)) : "";
+  return `${content}<div class="decision-images">${proof}${labeledImagesHTML(attachmentsHTML)}</div><details class="question-details"><summary>Détails · description et réponses</summary>${technicalHTML}</details>`;
+}
+
+function approvalFirstBody(msg, { attachmentsHTML = "", includeDetails = false, includeRetro = false } = {}) {
+  if (msg.state !== "approbation") return null;
+  const entries = msg.thread || [];
+  const doneIndex = entries.findLastIndex(entry => entry.from === "agent" && entry.kind === "done");
+  if (doneIndex < 0) return null;
+  const history = { ...msg, thread: entries.filter((_, index) => index !== doneIndex) };
+  const context = msg.context ? `<div class="context md">${markdownHTML(msg.context)}</div>` : "";
+  const details = includeDetails ? detailsHTML(msg.details) : { items: "", blocks: "" };
+  const result = entries[doneIndex].text.replace(/^Posted by:[^\r\n]*\r?$/gim, "");
+  return `<section class="owner-approval md">${labeledImagesHTML(markdownHTML(result))}</section>
+    <div class="decision-images">${labeledImagesHTML(attachmentsHTML)}</div>
+    <details class="question-details"><summary>Détails · description et réponses</summary>${context}${details.items ? `<ul>${details.items}</ul>` : ""}${details.blocks}
+      <div class="thread">${threadHTML(history)}</div>${includeRetro ? retroHTML(msg) : ""}</details>`;
 }
 
 // The one-line summary of a reply/decision shown once a card is "answered" —
@@ -631,8 +660,9 @@ function deriveCardView(msg, { pendingCounts } = {}) {
     const core = deriveCardCore(msg);
     const { items: details, blocks: detailBlocks } = detailsHTML(msg.details);
     const context = msg.context ? `<div class="context md">${markdownHTML(msg.context)}</div>` : "";
-    const question = questionFirstBody(msg, { includeDetails: true,
-      attachmentsHTML: `${imagesHTML(msg.images, msg.id)}${videosHTML(msg.videos)}` });
+    const bodyOptions = { includeDetails: true,
+      attachmentsHTML: `${imagesHTML(msg.images, msg.id)}${videosHTML(msg.videos)}` };
+    const question = questionFirstBody(msg, bodyOptions) || approvalFirstBody(msg, bodyOptions);
 
     return {
       kindBadge: core.kindLabel,
@@ -656,7 +686,8 @@ function deriveSentView(msg, delivered, { pendingCounts } = {}) {
     const core = deriveCardCore(msg);
     const read = Boolean(msg.acknowledgedAt);
     const context = msg.context ? `<div class="context md">${markdownHTML(msg.context)}</div>` : "";
-    const question = questionFirstBody(msg, { includeRetro: true, attachmentsHTML: imagesHTML(msg.images) });
+    const bodyOptions = { includeRetro: true, attachmentsHTML: imagesHTML(msg.images) };
+    const question = questionFirstBody(msg, bodyOptions) || approvalFirstBody(msg, bodyOptions);
     return {
       className: delivered ? "card sent answered" : "card sent",
       cancelable: !delivered && !read,
@@ -708,8 +739,9 @@ function overlayAgentBody(msg) {
   const awaitingDecision = core.awaitingDecision;
 
   const attachments = `${images ? `<div class="images">${images}</div>` : ""}${videos ? `<div class="videos">${videos}</div>` : ""}`;
-  const question = questionFirstBody(msg, { includeDetails: true, includeRetro: true, attachmentsHTML: attachments });
-  const bodyHTML = (question || `${msg.context ? `<div class="context md">${markdownHTML(msg.context)}</div>` : ""}${detailItems ? `<ul>${detailItems}</ul>` : ""}${detailBlocks}${attachments}${thread ? `<div class="thread">${thread}</div>` : ""}${core.retroHTML}`) + ExecutionView.render(msg);
+  const bodyOptions = { includeDetails: true, includeRetro: true, attachmentsHTML: attachments };
+  const question = questionFirstBody(msg, bodyOptions);
+  const bodyHTML = (question || approvalFirstBody(msg, bodyOptions) || `${msg.context ? `<div class="context md">${markdownHTML(msg.context)}</div>` : ""}${detailItems ? `<ul>${detailItems}</ul>` : ""}${detailBlocks}${attachments}${thread ? `<div class="thread">${thread}</div>` : ""}${core.retroHTML}`) + ExecutionView.render(msg);
 
   const footerHTML =
     msg.status === "answered" && !awaitingDecision
@@ -739,7 +771,8 @@ function overlayHumanBody(msg) {
   const approveBtn = core.canApprove ? `<button class="approve-issue-btn">✅ Approuver</button>` : "";
 
   const attachments = images ? `<div class="images">${images}</div>` : "";
-  const bodyHTML = (questionFirstBody(msg, { includeRetro: true, attachmentsHTML: attachments }) || `${msg.context ? `<div class="context md">${markdownHTML(msg.context)}</div>` : ""}${attachments}${thread ? `<div class="thread">${thread}</div>` : ""}${core.retroHTML}`) + ExecutionView.render(msg);
+  const bodyOptions = { includeRetro: true, attachmentsHTML: attachments };
+  const bodyHTML = (questionFirstBody(msg, bodyOptions) || approvalFirstBody(msg, bodyOptions) || `${msg.context ? `<div class="context md">${markdownHTML(msg.context)}</div>` : ""}${attachments}${thread ? `<div class="thread">${thread}</div>` : ""}${core.retroHTML}`) + ExecutionView.render(msg);
 
   const footerHTML = `
     <div class="reply-row overlay-footer-row">

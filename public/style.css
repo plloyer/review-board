@@ -380,6 +380,10 @@ body.overlay-open { overflow: hidden; }
 .owner-decision .question-choices { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
 .question-option { white-space: normal; text-align: left; }
 .owner-decision p { margin: 8px 0; }
+.decision-images { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.proof-image { display: inline-block; vertical-align: top; max-width: 100%; margin: 8px 0; }
+.proof-image img { max-width: 100%; }
+.proof-image figcaption { font-size: 12px; line-height: 1.4; color: #ccc; overflow-wrap: anywhere; }
 .question-details { margin-top: 16px; border-top: 1px solid var(--border, #3a3a3a); padding-top: 12px; }
 .question-details > summary { cursor: pointer; font-weight: 600; }
 .question-details[open] > summary { margin-bottom: 12px; }
