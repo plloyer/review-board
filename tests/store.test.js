@@ -1164,3 +1164,30 @@ test("Questions writes reject missing, multiple and progress-only decisions atom
   store.agentReply(card.id, "Investigation continues; no owner decision.", "update");
   assert.equal(store.list()[0].state, "backlog");
 });
+
+test("an agent never parks a started card in backlog to wait for a machine; another named reason may", () => {
+  const { store } = freshStore();
+  const card = store.createTask({ title: "Started", tags: ["unity"] });
+  const other = store.createTask({ title: "Blocker", tags: ["unity"] });
+  const start = () => store.moveTask(card.id, "in_progress", null, { actor: "agent", agent: AGENT });
+  start();
+  for (const note of [undefined, "", "Waits for a machine (3c-unity: slots full): back in the backlog until one is free",
+                      "no host has a free slot"]) {
+    assert.throws(() => store.moveTask(card.id, "backlog", note, { actor: "agent" }),
+      /stays in in_progress: a started card never goes back to backlog to wait for a machine/);
+    assert.equal(store.list().find((m) => m.id === card.id).state, "in_progress");
+  }
+  for (const [note, opts] of [
+    ["Its agent did not come back after 3 relaunches: back in the backlog with its worktree and round kept.", {}],
+    ["Waits for u2 to land before any machine retries it", {}],
+    ["Split into two cards", {}],
+    [null, { blockedBy: [other.id] }],
+    ["Waits for a machine", { mover: "board_invariants" }],
+  ]) {
+    store.moveTask(card.id, "backlog", note, { actor: "agent", ...opts });
+    assert.equal(store.list().find((m) => m.id === card.id).state, "backlog");
+    store.moveTask(card.id, "in_progress", null, { actor: "agent", agent: AGENT, blockedBy: [] });
+  }
+  store.moveTask(card.id, "backlog", null);  // PL dragging the card stays unrestricted
+  assert.equal(store.list().find((m) => m.id === card.id).state, "backlog");
+});

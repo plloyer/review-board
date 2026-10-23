@@ -477,10 +477,11 @@ function buildServer() {
         priority: PRIORITY_SCHEMA,
         agent: AGENT_SCHEMA,
         tags: TAGS_SCHEMA,
+        mover: z.string().optional().describe("The tool moving the card; \"board_invariants\" is the tools' single move function."),
       },
     },
-    async ({ id, state, note, blocked_by, priority, agent, tags }) => {
-      store.moveTask(id, state, note, { blockedBy: blocked_by, priority, actor: "agent", agent, tags });
+    async ({ id, state, note, blocked_by, priority, agent, tags, mover }) => {
+      store.moveTask(id, state, note, { blockedBy: blocked_by, priority, actor: "agent", agent, tags, mover });
       return { content: [{ type: "text", text: `Moved ${id} to ${state}` }] };
     }
   );

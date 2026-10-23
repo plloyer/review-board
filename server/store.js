@@ -444,11 +444,30 @@ function createChangeRequest({ title, details }) {
   return createTask({ title, context: details, taskKind: "change-request", tags: ["unity-free"] });
 }
 
+// PL 2026-10-23: a started card that waits for a machine stays in in_progress with a
+// "BLOCKER: attend une machine" update; it goes back to backlog only for another named
+// reason (a blocking card, PL's question, a split, a dead agent) or through the tools'
+// single move function (mover "board_invariants").
+const MACHINE_WAIT = /machine|host|hôte|slot|capacit/i;
+const OTHER_REASON = /question|split|scind|découp|divis|bloqu|blocked by|\bu\d+\b|dead|did not come back|mort/i;
+
+function machineWaitParking(note, blockedBy, mover) {
+  if (mover === "board_invariants" || (blockedBy && blockedBy.length)) return false;
+  const text = String(note || "").trim();
+  return !text || (MACHINE_WAIT.test(text) && !OTHER_REASON.test(text));
+}
+
+function machineWaitRefusalText(id) {
+  return `${id} stays in in_progress: a started card never goes back to backlog to wait for a machine (PL 2026-10-23). ` +
+    `Post an update "BLOCKER: attend une machine (<host: cause>)" instead, or name the other reason in the note ` +
+    `(blocked by a card with blocked_by, PL's question, a split).`;
+}
+
 // Moves a task/card to a new kanban state, optionally dropping a thread note
 // (same shape agentReply appends) and/or replacing its blockers/priority. Works
 // on any card id, human or agent-created.
 function moveTask(id, newState, note, opts = {}) {
-  const { blockedBy, priority, actor = "human", agent, tags } = opts;
+  const { blockedBy, priority, actor = "human", agent, tags, mover } = opts;
   if (!TASK_STATES.includes(newState)) throw new Error(`Unknown state ${newState}`);
   const msg = state.messages.find((m) => m.id === id);
   if (!msg) throw new Error(`No message ${id}`);
@@ -480,6 +499,10 @@ function moveTask(id, newState, note, opts = {}) {
   // itself unless the card already carries a declaration (re-entry after a refusal).
   if (actor === "agent" && newState === "in_progress" && !agent && !msg.agent) {
     throw new Error(agentRequiredText(id));
+  }
+
+  if (actor === "agent" && msg.state === "in_progress" && newState === "backlog" && machineWaitParking(note, blockedBy, mover)) {
+    throw new Error(machineWaitRefusalText(id));
   }
 
   // Validated before any mutation below: a bad blocker id must not leave a

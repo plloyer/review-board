@@ -142,6 +142,12 @@ test("move_task moves a card and rejects an unknown state", async () => {
 
   const bad = await client.callTool({ name: "move_task", arguments: { id: task.id, state: "bogus" } });
   assert.equal(bad.isError, true);
+
+  const parked = await client.callTool({ name: "move_task", arguments: { id: task.id, state: "backlog", note: "Waits for a machine" } });
+  assert.equal(parked.isError, true);
+  assert.match(parked.content[0].text, /BLOCKER: attend une machine/);
+  await client.callTool({ name: "move_task", arguments: { id: task.id, state: "backlog", note: "Waits for a machine", mover: "board_invariants" } });
+  assert.equal(store.list().find((m) => m.id === task.id).state, "backlog");
 });
 
 test("reply_to_message kind question/done move the card; kind update does not", async () => {
