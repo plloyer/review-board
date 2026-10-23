@@ -6,6 +6,9 @@
   // A request addressed to the owner; a technical adjective such as "test valide"
   // is not a decision. Unsupported phrasing is refused rather than guessed.
   const ownerAction = /^(?:(?:valides|validez|acceptes|acceptez|approuves|approuvez|autorises|autorisez|choisis|choisissez|préfères|préférez|gardes|gardez|veux|voulez|souhaites|souhaitez)[- ](?:tu|vous)\b|(?:on|nous|tu|vous)\s+(?:valide|validons|accept|approuv|autoris|chois|préf|gard|publi|lanc|utilis)[a-zéèê-]*\b|quel(?:le)?\b.*\b(?:mettre|choisir|garder|retenir|utiliser)\b|(?:do you want|would you like|can we|shall we|should we|keep it|choose|approve|allow|accept|prefer)\b)/i;
+  const openingVerbs = "Valides-tu, Acceptes-tu, Approuves-tu, Autorises-tu, Choisis-tu, Préfères-tu, Gardes-tu, "
+    + "Veux-tu or Souhaites-tu (or the -vous form), On/Nous valide, accepte, choisit, garde, publie, lance or utilise, "
+    + "or Quel(le) ... mettre/choisir/garder/retenir/utiliser; for example \"Question : Valides-tu cet affichage ? OUI ou NON\"";
   const secondAction = /\b(?:et|puis|ainsi que|aussi|egalement|and|then|also)\b|[;/]|\bplus\s+(?:le|la|les|un|une|des|ce|cet|cette|ces)\b|,\s*(?:tu|vous|on|nous|you|we)\b/i;
 
   function parse(text, suppliedOptions = [], title = "") {
@@ -37,8 +40,14 @@
     if (unique.length !== 1) return { error: "one precise owner decision is required; progress belongs in En cours" };
     const question = unique[0].replace(/^\[[^\]]+\]\s*/, "");
     const plainQuestion = question.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    if (!ownerAction.test(question) || secondAction.test(plainQuestion)) {
-      return { error: "ask one owner choice or approval; investigation and progress belong in En cours" };
+    // A refusal that hid the accepted openings left a builder guessing for 10 h (2026-10-21).
+    if (!ownerAction.test(question)) {
+      return { error: "ask one owner choice or approval: open the Question with " + openingVerbs
+        + "; investigation and progress belong in En cours" };
+    }
+    if (secondAction.test(plainQuestion)) {
+      return { error: "ask one owner choice or approval: one decision only, no et/puis/aussi, ';' or '/' joining a second one"
+        + "; investigation and progress belong in En cours" };
     }
     let options = Array.isArray(suppliedOptions) ? suppliedOptions.map(String).filter((value) => value.trim()) : [];
     const answerSource = explicit ? sections.question : body.split(/^(?:\*\*)?D[ée]tails(?:\*\*)?\s*:/im)[0];

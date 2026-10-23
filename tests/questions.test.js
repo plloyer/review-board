@@ -88,3 +88,12 @@ test("known closure counterexamples cannot bundle a second decision", () => {
   }
   assert.equal(Questions.requireDecision(valid.replace("Valides-tu cet affichage ?", "Veux-tu plus de contraste ?")).question, "Veux-tu plus de contraste ?");
 });
+
+test("a refused opening names the accepted verbs and one valid example", () => {
+  const refused = Questions.requireDecision.bind(null, valid.replace("Valides-tu cet affichage ?", "Est-ce que cet affichage te convient ?"));
+  assert.throws(refused, /ask one owner choice or approval: open the Question with Valides-tu, Acceptes-tu.*Question : Valides-tu cet affichage \? OUI ou NON/);
+  assert.throws(() => Questions.requireDecision(valid.replace("Valides-tu cet affichage ?", "Valides-tu cet affichage et autorises-tu cette dépense ?")),
+    /ask one owner choice or approval: one decision only/);
+  const example = "Question : Valides-tu cet affichage ? OUI ou NON\nRecommandation : OUI.\nConséquence : il reste.";
+  assert.equal(Questions.requireDecision(example).question, "Valides-tu cet affichage ?");
+});
