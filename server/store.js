@@ -156,7 +156,11 @@ function save(state, metadata = {}) {
       author = metadata.author || entry.from;
       kind = metadata.kind || (author === "human" ? (APPROVAL_TEXT_RE.test(entry.text.trim()) ? "approval" : "reply") : "agent_reply");
     }
-    appendEvent({ cardId: card.replyTo || id, kind, author, state: card.state });
+    const event = { cardId: card.replyTo || id, kind, author, state: card.state };
+    // A blockedBy change is journaled with the new list, so stage metrics can date a dependency.
+    const blockers = card.blockedBy || [];
+    if (JSON.stringify(blockers) !== JSON.stringify((previous && previous.blockedBy) || [])) event.blockedBy = blockers;
+    appendEvent(event);
   }
   for (const id of persistedCards.keys()) {
     if (!current.has(id)) appendEvent({ cardId: id, kind: "removed", author: metadata.author || "agent" });
@@ -452,9 +456,11 @@ const MACHINE_WAIT = /machine|host|hôte|slot|capacit/i;
 const OTHER_REASON = /question|split|scind|découp|divis|bloqu|blocked by|\bu\d+\b|dead|did not come back|mort/i;
 
 function machineWaitParking(note, blockedBy, mover) {
-  if (mover === "board_invariants" || (blockedBy && blockedBy.length)) return false;
+  if (blockedBy && blockedBy.length) return false;
   const text = String(note || "").trim();
-  return !text || (MACHINE_WAIT.test(text) && !OTHER_REASON.test(text));
+  // Every park names its reason, the tools' own included: the stage metrics read it (2026-10-24).
+  if (!text) return true;
+  return mover !== "board_invariants" && MACHINE_WAIT.test(text) && !OTHER_REASON.test(text);
 }
 
 function machineWaitRefusalText(id) {

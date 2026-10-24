@@ -682,6 +682,19 @@ test("setBlockers replaces the list; empty list unblocks", () => {
   assert.deepEqual(store.list().find((m) => m.id === a.id).blockedBy, []);
 });
 
+test("the journal records every blockedBy change with the new list, and only a change", () => {
+  const { store } = freshStore();
+  const b = store.createTask({ tags: ["unity-free"], title: "B" });
+  const a = store.createTask({ tags: ["unity-free"], title: "A", blockedBy: [b.id] });
+  store.setBlockers(a.id, [b.id]);
+  store.setPriority(a.id, 1);
+  store.moveTask(a.id, "in_progress", null, { blockedBy: [] });
+  store.setBlockers(a.id, [b.id]);
+  const lists = store.replayEvents(0).events.filter((event) => event.cardId === a.id)
+    .map((event) => [event.kind, event.blockedBy]);
+  assert.deepEqual(lists, [["created", [b.id]], ["priority", undefined], ["move", []], ["change", [b.id]]]);
+});
+
 test("createTask and moveTask accept blockedBy", () => {
   const { store } = freshStore();
   const b = store.createTask({ tags: ["unity-free"], title: "B" });
@@ -1171,9 +1184,11 @@ test("an agent never parks a started card in backlog to wait for a machine; anot
   const other = store.createTask({ title: "Blocker", tags: ["unity"] });
   const start = () => store.moveTask(card.id, "in_progress", null, { actor: "agent", agent: AGENT });
   start();
-  for (const note of [undefined, "", "Waits for a machine (3c-unity: slots full): back in the backlog until one is free",
-                      "no host has a free slot"]) {
-    assert.throws(() => store.moveTask(card.id, "backlog", note, { actor: "agent" }),
+  for (const [note, opts] of [[undefined, {}], ["", {}],
+                              ["Waits for a machine (3c-unity: slots full): back in the backlog until one is free", {}],
+                              ["no host has a free slot", {}],
+                              ["", { mover: "board_invariants" }]]) {  // the tools' parks name a reason too
+    assert.throws(() => store.moveTask(card.id, "backlog", note, { actor: "agent", ...opts }),
       /stays in in_progress: a started card never goes back to backlog to wait for a machine/);
     assert.equal(store.list().find((m) => m.id === card.id).state, "in_progress");
   }
