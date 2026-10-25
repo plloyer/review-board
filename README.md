@@ -115,7 +115,9 @@ so the intake explicitly classifies those reports as `unity`: a player's in-game
 bug is fixed in the Unity project. Client-supplied work tags take precedence.
 Malformed tags, empty arrays and host-only tags return a JSON-RPC `-32602` error
 naming the choices, without changing storage. Direct MCP `create_task` still
-requires a work tag. Replays of an existing report marker still return its
+requires a work tag, and (card scope, `server/mcp.js` `cardScopeRefusal`) a context with
+exactly one line `Estimate: <hours> h` of at most 3 h and at most 5 top-level list items;
+`send_message` too. A `feedback` context carrying an F7 report marker is exempt. Replays of an existing report marker still return its
 original card, including legacy untagged cards.
 The HTTP MCP endpoints are `/mcp` and `/mcp-live`;
 there is no separate REST create-task endpoint. Omitting `taskKind` still creates

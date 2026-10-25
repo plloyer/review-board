@@ -3,6 +3,8 @@
 // transport) so kind->state side effects are proven at the tool boundary, not
 // just in the store functions the tools call.
 const test = require("node:test");
+// The card-scope line every agent-filed card carries (server/mcp.js cardScopeRefusal).
+const SCOPE = "Estimate: 1 h";
 const assert = require("node:assert/strict");
 const fs = require("fs");
 const os = require("os");
@@ -35,13 +37,13 @@ test("create_task requires a work tag through MCP for every kind and accepts eac
     for (const taskKind of [undefined, "projet", "feedback", "change-request"]) {
       for (const tags of [undefined, [], ["mac", "3c-unity"]]) {
         const count = store.list().length;
-        const result = await client.callTool({ name: "create_task", arguments: { title: "Unclassified", taskKind, tags } });
+        const result = await client.callTool({ name: "create_task", arguments: { context: SCOPE, title: "Unclassified", taskKind, tags } });
         assert.equal(result.isError, true);
         assert.match(result.content[0].text, /Work tag required: choose unity, unity-free or koh2/);
         assert.equal(store.list().length, count);
       }
       for (const tag of ["unity", "unity-free", "koh2"]) {
-        const result = await client.callTool({ name: "create_task", arguments: { title: "Classified", taskKind, tags: [` ${tag.toUpperCase()} `] } });
+        const result = await client.callTool({ name: "create_task", arguments: { context: SCOPE, title: "Classified", taskKind, tags: [` ${tag.toUpperCase()} `] } });
         assert.equal(result.isError, undefined);
         const card = store.list().find((card) => card.id === result.content[0].text);
         assert.equal(card.taskKind, taskKind ?? "projet");
@@ -64,7 +66,7 @@ test("create_task requires a work tag through MCP for every kind and accepts eac
 test("create_task files a backlog project task", async () => {
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
-  const res = await client.callTool({ name: "create_task", arguments: { tags: ["unity-free"], title: "Refactor the thing" } });
+  const res = await client.callTool({ name: "create_task", arguments: { context: SCOPE, tags: ["unity-free"], title: "Refactor the thing" } });
   const id = res.content[0].text;
   const task = store.list().find((m) => m.id === id);
   assert.equal(task.state, "backlog");
@@ -72,22 +74,55 @@ test("create_task files a backlog project task", async () => {
   assert.equal(task.priority, 2);
 });
 
+test("card scope: an agent card needs one Estimate line of at most 3 h and at most 5 list items; F7 and PL's cards are exempt", async () => {
+  const { store, mcp } = freshServer();
+  const client = await connectedClient(mcp);
+  try {
+    const six = "- a\n- b\n- c\n- d\n- e\n- f\nEstimate: 1 h";
+    for (const context of [undefined, "", "Estimate: 4 h", "Estimate: 1 h\nEstimate: 2 h", six]) {
+      for (const taskKind of [undefined, "feedback", "change-request"]) {
+        const refused = await client.callTool({ name: "create_task", arguments: { title: "Unscoped", taskKind, context, tags: ["unity-free"] } });
+        assert.equal(refused.isError, true, String(context));
+        assert.match(refused.content[0].text, /^CARD SCOPE: .*--estimate.*--blocked-by/);
+      }
+      const sent = await client.callTool({ name: "send_message", arguments: { messages: [{ title: "FYI", kind: "note", context }] } });
+      assert.equal(sent.isError, true, String(context));
+      assert.match(sent.content[0].text, /^CARD SCOPE: /);
+    }
+    const details = ["a", "b", "c", "d", "e", "f"];
+    const tooMany = await client.callTool({ name: "send_message", arguments: { messages: [{ title: "FYI", kind: "note", context: SCOPE, details }] } });
+    assert.equal(tooMany.isError, true);
+    assert.deepEqual(store.list(), []);
+    for (const context of ["Estimate: 3 h", "Fix it.\n\nEstimate: 0,5 h", "- a\n- b\n- c\n- d\n- e\nEstimate: 2.5 h"]) {
+      const created = await client.callTool({ name: "create_task", arguments: { title: "Scoped", context, tags: ["unity-free"] } });
+      assert.equal(created.isError, undefined, created.content[0].text);
+    }
+    // A player's F7 report filed on this endpoint (not the intake) carries its marker, never an estimate.
+    const report = await client.callTool({ name: "create_task", arguments: { title: "[F7] Crash", taskKind: "feedback", tags: ["unity"], context: "Crash on load\n[three-crowns-report:abc-123]" } });
+    assert.equal(report.isError, undefined, report.content[0].text);
+    // PL's own board-UI card (web.js POST /api/messages) never passes through the MCP tools.
+    assert.equal(store.addHumanMessage("Refais le menu principal", [], null).state, "backlog");
+  } finally {
+    await client.close();
+  }
+});
+
 test("create_task priority defaults apply through MCP without changing explicit levels or feedback", async () => {
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
   try {
     for (const priority of [undefined, 0, 1, 2, 3]) {
-      const arguments_ = { tags: ["unity-free"], title: "Project priority", taskKind: "projet" };
+      const arguments_ = { context: SCOPE, tags: ["unity-free"], title: "Project priority", taskKind: "projet" };
       if (priority !== undefined) arguments_.priority = priority;
       const result = await client.callTool({ name: "create_task", arguments: arguments_ });
       assert.equal(result.isError, undefined);
       assert.equal(store.list().find((m) => m.id === result.content[0].text).priority, priority ?? 2);
     }
-    const feedback = await client.callTool({ name: "create_task", arguments: { tags: ["unity-free"], title: "Player report", taskKind: "feedback" } });
+    const feedback = await client.callTool({ name: "create_task", arguments: { context: SCOPE, tags: ["unity-free"], title: "Player report", taskKind: "feedback" } });
     assert.equal(store.list().find((m) => m.id === feedback.content[0].text).priority, undefined);
     const count = store.list().length;
     for (const priority of [null, -1, 4, 1.5, "2", true]) {
-      const result = await client.callTool({ name: "create_task", arguments: { tags: ["unity-free"], title: "Invalid priority", priority } });
+      const result = await client.callTool({ name: "create_task", arguments: { context: SCOPE, tags: ["unity-free"], title: "Invalid priority", priority } });
       assert.equal(result.isError, true);
       assert.equal(store.list().length, count);
     }
@@ -102,14 +137,14 @@ test("create_task accepts feedback, advertises its enum, and rejects unknown kin
   try {
     const tools = await client.listTools();
     assert.deepEqual(tools.tools.find((t) => t.name === "create_task").inputSchema.properties.taskKind.enum, ["projet", "feedback", "change-request"]);
-    const context = "Player crash after loading. [Save](/api/file?path=save.tc)";
+    const context = "Player crash after loading. [Save](/api/file?path=save.tc)\nEstimate: 1 h";
     const result = await client.callTool({ name: "create_task", arguments: { tags: ["unity-free"], title: "Player bug", taskKind: "feedback", context } });
     assert.equal(result.content.length, 2);
     const card = store.list().find((m) => m.id === result.content[0].text);
     assert.equal(card.taskKind, "feedback");
     assert.equal(card.state, "backlog");
     assert.equal(card.context, context);
-    const invalid = await client.callTool({ name: "create_task", arguments: { tags: ["unity-free"], title: "Bad", taskKind: "unknown" } });
+    const invalid = await client.callTool({ name: "create_task", arguments: { context: SCOPE, tags: ["unity-free"], title: "Bad", taskKind: "unknown" } });
     assert.equal(invalid.isError, true);
     assert.equal(store.list().length, 1);
     const delivery = await client.callTool({ name: "await_replies", arguments: { timeoutSeconds: 1 } });
@@ -122,7 +157,7 @@ test("create_task accepts feedback, advertises its enum, and rejects unknown kin
 test("create_task returns the bare id as its first block, unchanged, plus a dependency reminder block", async () => {
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
-  const res = await client.callTool({ name: "create_task", arguments: { tags: ["unity-free"], title: "T" } });
+  const res = await client.callTool({ name: "create_task", arguments: { context: SCOPE, tags: ["unity-free"], title: "T" } });
   // First block stays EXACTLY the id — a caller parsing content[0].text as the id must keep working.
   const first = res.content[0].text;
   assert.match(first, /^u?t?\d+$/); // an id like "t1" — no label, no extra text
@@ -275,7 +310,7 @@ test("reply_to_message rejects a retro param on any kind other than 'done', with
 test("the approved human-direction workflow lands: create_task -> done -> Approuvé -> move_task landing", async () => {
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
-  await client.callTool({ name: "create_task", arguments: { tags: ["unity-free"], title: "wire the menu", context: "c" } });
+  await client.callTool({ name: "create_task", arguments: { tags: ["unity-free"], title: "wire the menu", context: SCOPE } });
   const task = store.list().find((m) => m.title === "wire the menu");
   await client.callTool({ name: "move_task", arguments: { id: task.id, state: "in_progress", agent: AGENT } });
   store.agentReply(task.id, "done, proof attached", "done");
@@ -294,7 +329,7 @@ test("create_task/move_task accept blocked_by and priority; set_blockers/set_pri
 
   const created = await client.callTool({
     name: "create_task",
-    arguments: { tags: ["unity-free"], title: "Dependent", blocked_by: [blocker.id], priority: 1 },
+    arguments: { context: SCOPE, tags: ["unity-free"], title: "Dependent", blocked_by: [blocker.id], priority: 1 },
   });
   const depId = created.content[0].text;
   const dep = store.list().find((m) => m.id === depId);
@@ -318,7 +353,7 @@ test("create_task with priority 0 roundtrips, and set_priority to 0 works", asyn
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
 
-  const created = await client.callTool({ name: "create_task", arguments: { tags: ["unity-free"], title: "Critical", priority: 0 } });
+  const created = await client.callTool({ name: "create_task", arguments: { context: SCOPE, tags: ["unity-free"], title: "Critical", priority: 0 } });
   const id = created.content[0].text;
   assert.equal(store.list().find((m) => m.id === id).priority, 0);
 
@@ -340,7 +375,7 @@ test("set_blockers rejects a cycle through the MCP tool boundary", async () => {
 test("create_task with no_review roundtrips onto the card, visible via list_messages like any other task", async () => {
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
-  const res = await client.callTool({ name: "create_task", arguments: { tags: ["unity-free"], title: "Trivial task", no_review: true } });
+  const res = await client.callTool({ name: "create_task", arguments: { context: SCOPE, tags: ["unity-free"], title: "Trivial task", no_review: true } });
   const id = res.content[0].text;
   assert.equal(store.list().find((m) => m.id === id).noReview, true);
   const listed = await client.callTool({ name: "list_messages", arguments: {} });
@@ -363,7 +398,7 @@ test("move_task to landing on a normal in_progress card returns the instructive 
 test("move_task to landing succeeds for a no_review card", async () => {
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
-  const created = await client.callTool({ name: "create_task", arguments: { tags: ["unity-free"], title: "Trivial task", no_review: true } });
+  const created = await client.callTool({ name: "create_task", arguments: { context: SCOPE, tags: ["unity-free"], title: "Trivial task", no_review: true } });
   const id = created.content[0].text;
   await client.callTool({ name: "move_task", arguments: { id, state: "in_progress", agent: AGENT } });
 
@@ -415,7 +450,7 @@ test("send_message rejects a missing images/videos path, listing them verbatim a
   const missingVid = path.join(os.tmpdir(), "review-board-missing-vid-does-not-exist.mp4");
   const res = await client.callTool({
     name: "send_message",
-    arguments: { messages: [{ title: "Look at this", images: [{ path: missingImg }], videos: [{ path: missingVid }] }] },
+    arguments: { messages: [{ title: "Look at this", context: SCOPE, images: [{ path: missingImg }], videos: [{ path: missingVid }] }] },
   });
   assert.equal(res.isError, true);
   const text = res.content[0].text;
@@ -433,7 +468,7 @@ test("send_message succeeds when every images/videos path exists on this machine
   fs.writeFileSync(img, "bytes");
   const res = await client.callTool({
     name: "send_message",
-    arguments: { messages: [{ title: "Look at this", images: [{ path: img, label: "Before", caption: "Our settlement at dawn" }] }] },
+    arguments: { messages: [{ title: "Look at this", context: SCOPE, images: [{ path: img, label: "Before", caption: "Our settlement at dawn" }] }] },
   });
   assert.equal(res.isError, undefined);
   assert.equal(store.list().length, 1);
@@ -592,7 +627,7 @@ test("reply_to_message rejects a malformed image target even when a quoted title
 test("tags travel through create_task / move_task and show in list_messages", async () => {
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
-  const created = await client.callTool({ name: "create_task", arguments: { title: "Build on the Mac", tags: ["mac", "unity"] } });
+  const created = await client.callTool({ name: "create_task", arguments: { context: SCOPE, title: "Build on the Mac", tags: ["mac", "unity"] } });
   const id = created.content[0].text;
   assert.deepEqual(store.list().find((m) => m.id === id).tags, ["mac", "unity"]);
   const res = await client.callTool({ name: "list_messages", arguments: {} });
@@ -675,8 +710,8 @@ test("MCP validates every Questions message before committing a mixed batch", as
   const { store, mcp } = freshServer();
   const client = await connectedClient(mcp);
   const response = await client.callTool({ name: "send_message", arguments: { messages: [
-    { title: "FYI", kind: "note" },
-    { title: "Technical investigation", kind: "question", context: "Je compare les erreurs." },
+    { title: "FYI", kind: "note", context: SCOPE },
+    { title: "Technical investigation", kind: "question", context: "Je compare les erreurs.\nEstimate: 1 h" },
   ] } });
   assert.equal(response.isError, true);
   assert.match(response.content[0].text, /OWNER DECISION REQUIRED/);

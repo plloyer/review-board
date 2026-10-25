@@ -4,6 +4,8 @@
 // REVIEW_BOARD_DATA_DIR to a temp dir BEFORE requiring anything under server/
 // so store.js and push.js (VAPID keys, subscriptions) never touch real data/.
 const test = require("node:test");
+// The card-scope line every agent-filed card carries (server/mcp.js cardScopeRefusal).
+const SCOPE = "Estimate: 1 h";
 const assert = require("node:assert/strict");
 const fs = require("fs");
 const os = require("os");
@@ -597,7 +599,7 @@ for (const endpoint of ["/mcp", "/mcp-live"]) {
       const client = new Client({ name: "feedback-http-test", version: "1" });
       await client.connect(new StreamableHTTPClientTransport(new URL(endpoint, base)));
       try {
-        const context = "Loading day 42 crashes. [Save](/api/file?path=example.tc)";
+        const context = "Loading day 42 crashes. [Save](/api/file?path=example.tc)\nEstimate: 1 h";
         const result = await client.callTool({ name: "create_task", arguments: { tags: ["unity-free"], title: "Player bug", context, taskKind: "feedback" } });
         assert.notEqual(result.isError, true, result.content[0].text);
         const cards = await (await fetch(`${base}/api/reviews`)).json();
@@ -606,10 +608,10 @@ for (const endpoint of ["/mcp", "/mcp-live"]) {
         assert.equal(card.state, "backlog");
         assert.equal(card.direction, "human");
         assert.equal(card.context, context);
-        const project = await client.callTool({ name: "create_task", arguments: { tags: ["unity-free"], title: "Default project" } });
+        const project = await client.callTool({ name: "create_task", arguments: { context: SCOPE, tags: ["unity-free"], title: "Default project" } });
         assert.equal(store.list().find((m) => m.id === project.content[0].text).taskKind, "projet");
         const count = store.list().length;
-        const invalid = await client.callTool({ name: "create_task", arguments: { tags: ["unity-free"], title: "Invalid", taskKind: "unknown" } });
+        const invalid = await client.callTool({ name: "create_task", arguments: { context: SCOPE, tags: ["unity-free"], title: "Invalid", taskKind: "unknown" } });
         assert.equal(invalid.isError, true);
         assert.equal(store.list().length, count);
       } finally {

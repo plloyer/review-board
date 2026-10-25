@@ -16,6 +16,34 @@ const { AGENT_VENDORS } = require("../shared/agents");
 
 const isVideoPath = (p) => /\.(mp4|webm|mov)$/i.test(String(p || ""));
 
+// Card scope (PL 2026-10-23/25): every card an agent files is one deliverable it finishes in at
+// most 3 h. Enforced here, on create_task and send_message, because every agent client (board.py,
+// Claude, Codex, a bare HTTP call) files through these tools; the F7 intake (intake.js) and PL's
+// own cards (web.js) never come here. Body: exactly one "Estimate: <hours> h" line <= 3, and at
+// most 5 top-level list items (send_message's details count as items).
+const MAXIMUM_ESTIMATE_HOURS = 3;
+const MAXIMUM_LIST_ITEMS = 5;
+const ESTIMATE_LINE = /^\s*Estimate:\s*(\d+(?:[.,]\d+)?)\s*h\b/gim;
+const TOP_LEVEL_LIST_ITEM = /^(?:[-*]|\d+[.)])\s/gm;
+const PLAYER_REPORT_MARKER = /\[three-crowns-report:[A-Za-z0-9-]{1,64}\]/;
+
+function cardScopeRefusal(context, detailItems = 0) {
+  const text = String(context || "");
+  const fix =
+    "Fix: state its agent-work estimate, at most 3 h (board.py task --estimate <hours>; a direct " +
+    "create_task or send_message carries one body line 'Estimate: <hours> h'); more than one " +
+    "deliverable: file each as its own card, a remainder that waits on this one with --blocked-by " +
+    "(blocked_by on create_task).";
+  const refused = (why) => `CARD SCOPE: one card = one deliverable an agent finishes in at most 3 h (PL 2026-10-23); ${why}. ${fix}`;
+  const items = (text.match(TOP_LEVEL_LIST_ITEM) || []).length + detailItems;
+  if (items > MAXIMUM_LIST_ITEMS) return refused(`the body lists ${items} top-level items, more than ${MAXIMUM_LIST_ITEMS}`);
+  const estimates = [...text.matchAll(ESTIMATE_LINE)];
+  if (estimates.length !== 1) return refused(`the body needs exactly one 'Estimate: <hours> h' line, found ${estimates.length}`);
+  const hours = Number(estimates[0][1].replace(",", "."));
+  if (hours > MAXIMUM_ESTIMATE_HOURS) return refused(`estimate ${hours} h is over ${MAXIMUM_ESTIMATE_HOURS} h`);
+  return null;
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -142,7 +170,7 @@ function missingTextRefs(text) {
 // Stateless HTTP has no tools/list_changed channel, so the version rides every
 // await_replies trailer instead — a session that connected under an older
 // version learns from the delivery text that its cached tool list is stale.
-const TOOLS_VERSION = "v14"; // v14: required work tags; v13: scoped, bounded get_message
+const TOOLS_VERSION = "v15"; // v15: card scope (Estimate line) on create_task/send_message; v14: required work tags; v13: scoped, bounded get_message
 
 function buildServer() {
   // The workflow travels with the MCP handshake so every client learns it without
@@ -151,7 +179,7 @@ function buildServer() {
     `Review-board workflow (tools ${TOOLS_VERSION}). States: backlog -> in_progress -> questions -> approbation -> landing -> closed.`,
     "Loop: await_replies (at-least-once: acknowledge_messages after reading, or items redeliver; ack = READ, never fixed).",
     "Focused decision read: get_message reads one exact card and its direct thread only, without delivery or acknowledgement. Server-side exact-id scope must allow that card; this read grants no native permission. Never fall back to a global dump after a denied read.",
-    "Pick work: the human's feedback backlog cards outrank projet tasks. Player-filed F7 cards ('[F7] ' titles) land in backlog like any feedback card. File your own tasks with create_task.",
+    "Pick work: the human's feedback backlog cards outrank projet tasks. Player-filed F7 cards ('[F7] ' titles) land in backlog like any feedback card. File your own tasks with create_task. Card scope: every create_task/send_message body carries exactly one line 'Estimate: <hours> h' of at most 3 h and at most 5 top-level list items (one card = one deliverable; split the rest into cards with blocked_by), else the board refuses it.",
     "Dependencies: set_blockers / blocked_by on create_task/move_task (blocked until blockers reach landing/closed; you get a \"débloquée\" delivery). Priority: set_priority / priority 0-3 (0 = critical, 1 = highest, then in order).",
     "Tags (listed by list_messages as tags: a,b): create_task requires at least one work tag for every taskKind: unity (needs a Unity editor/pool copy), unity-free (no Unity editor needed), koh2 (needs the original game installed). request_change explicitly assigns unity-free for board work. F7 intake classifies reports that omit tags as unity for compatibility with shipped game clients; client-supplied work tags take precedence, while malformed or host-only tags are refused. Optional host constraints: windows / mac / linux or a machine name. Never start a card whose tags exclude your machine. Existing cards keep their legacy classification; move_task may replace or clear tags.",
     "Start a card: move_task in_progress with agent {vendor, model, effort} (required the first time: it draws who works the card; reply_to_message also takes agent when a card changes hands). Blocked on the human: reply_to_message kind question (auto-moves to questions). Progress notes: kind update (silent, folded away under a closed \"notes de suivi\" line; free-form). The text of a question or done is the bright box he must read: plain, friendly language, no jargon, and every piece of it needed for him to understand, nothing else (no tag prefixes like [3C-host] or (plloyer-desktop); provenance goes in one final line \"Posted by: <machine>\" that the poster tool adds, not in a prefix; a machine name, id or technical term only when he needs it), readable on its own without the updates.",
@@ -199,7 +227,7 @@ function buildServer() {
     "send_message",
     {
       description:
-        "Queue one or more messages on the human's local review board — a review to look at (attach screenshots via `images` and/or a short clip via `videos` so they can see what it looks like/plays like), a blocking question, or an FYI note. Non-blocking; returns the ids assigned.",
+        "Queue one or more messages on the human's local review board — a review to look at (attach screenshots via `images` and/or a short clip via `videos` so they can see what it looks like/plays like), a blocking question, or an FYI note. Non-blocking; returns the ids assigned. Each message's context needs exactly one line 'Estimate: <hours> h' of at most 3 h, and context list items plus details at most 5 (card scope).",
       inputSchema: {
         messages: z
           .array(
@@ -231,6 +259,8 @@ function buildServer() {
       if (missing.length) return { isError: true, content: [{ type: "text", text: attachmentErrorText(missing) }] };
       // Validate the complete batch before the first card or id is persisted.
       for (const message of messages) {
+        const scope = cardScopeRefusal(message.context, (message.details || []).length);
+        if (scope) return { isError: true, content: [{ type: "text", text: scope }] };
         if (message.kind === "question") require("../shared/questions").requireDecision(message.context, message.options, message.title);
       }
       const created = messages.map((m) => store.addAgentMessage(m));
@@ -433,7 +463,7 @@ function buildServer() {
     "create_task",
     {
       description:
-        "Add a card to the human's backlog. Every taskKind requires tags containing unity (needs a Unity editor/pool copy), unity-free (no Unity editor needed), or koh2 (needs the original game installed). Defaults to taskKind projet with priority 2 when omitted; use feedback for a player's bug report, with context and optional save download link. Feedback cards, player-filed F7 reports included, start in backlog and outrank project tasks.",
+        "Add a card to the human's backlog. Every taskKind requires tags containing unity (needs a Unity editor/pool copy), unity-free (no Unity editor needed), or koh2 (needs the original game installed). Defaults to taskKind projet with priority 2 when omitted; use feedback for a player's bug report, with context and optional save download link. Feedback cards, player-filed F7 reports included, start in backlog and outrank project tasks. The context needs exactly one line 'Estimate: <hours> h' of at most 3 h and at most 5 top-level list items (card scope; a player's F7 report is exempt).",
       inputSchema: {
         title: z.string(),
         taskKind: z.enum(["projet", "feedback", "change-request"]).optional().describe("Defaults to projet. feedback files a real feedback/retours card; change-request proposes a change. All require a work tag."),
@@ -449,6 +479,10 @@ function buildServer() {
       },
     },
     async ({ title, context, project, blocked_by, priority, no_review, tags, taskKind }) => {
+      // A player's F7 report sent to this endpoint instead of the intake is scoped later, like the intake's.
+      const playerReport = taskKind === "feedback" && PLAYER_REPORT_MARKER.test(context || "");
+      const scope = playerReport ? null : cardScopeRefusal(context);
+      if (scope) return { isError: true, content: [{ type: "text", text: scope }] };
       const msg = store.createTask({ title, context, project, blockedBy: blocked_by, priority, noReview: no_review, tags, taskKind });
       // First block stays the bare id (callers parse it as-is); a second block reminds
       // how to wire dependencies/priority, which the bare-id return left easy to miss.
